@@ -11,8 +11,8 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use obd_io::{
-    discover_serial_ports, generic_profile, load_profiles_dir, BusTag, ElmConfig, ElmTransport,
-    ReplayTransport, VehicleSession,
+    connect, discover_adapters, format_endpoint_list, generic_profile, load_profiles_dir,
+    ConnectOptions, LinkPrefer, ReplayTransport, VehicleSession,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -25,20 +25,37 @@ use crate::app::{App, Tab};
 #[derive(Parser, Debug)]
 #[command(
     name = "obdtui",
-    about = "OBD-II diagnostic TUI. Default mode is read-only.",
+    about = "OBD-II diagnostic TUI. USB serial and Bluetooth SPP. Default mode is read-only.",
     version,
-    long_about = "Connect to a USB OBD-II adapter or replay a capture session.\n\
+    long_about = "Connect to a USB OBD-II adapter or Bluetooth classic SPP adapter,\n\
+or replay a capture session.\n\
 Default mode is read-only. Clear DTCs only with --allow-writes.\n\
 0.x releases may change interfaces."
 )]
 struct Args {
-    /// Serial port path (example: /dev/ttyUSB0). Auto-detect when omitted.
+    /// Serial port path (USB: /dev/ttyUSB0, BT: /dev/rfcomm0). Auto-detect when omitted.
     #[arg(short, long, env = "OBDTUI_PORT")]
     port: Option<String>,
 
-    /// Serial baud rate
-    #[arg(long, default_value_t = 38400)]
-    baud: u32,
+    /// Serial baud rate. When omitted, try common rates for the link type.
+    #[arg(long, env = "OBDTUI_BAUD")]
+    baud: Option<u32>,
+
+    /// Prefer link type when auto-detecting: auto | usb | bluetooth
+    #[arg(long, default_value = "auto", env = "OBDTUI_PREFER")]
+    prefer: String,
+
+    /// Bluetooth MAC (classic SPP). Binds RFCOMM when needed (may need sudo).
+    #[arg(long, env = "OBDTUI_BT_MAC")]
+    bt_mac: Option<String>,
+
+    /// RFCOMM device index for --bt-mac (default 0 → /dev/rfcomm0)
+    #[arg(long, default_value_t = 0)]
+    rfcomm_index: u8,
+
+    /// RFCOMM channel (default 1 for most ELM sticks)
+    #[arg(long, default_value_t = 1)]
+    rfcomm_channel: u8,
 
     /// Replay a capture directory instead of live hardware
     #[arg(long)]
@@ -60,7 +77,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     allow_writes: bool,
 
-    /// List serial ports and exit
+    /// List USB and Bluetooth endpoints and exit
     #[arg(long)]
     list_ports: bool,
 
@@ -81,12 +98,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     if args.list_ports {
-        match discover_serial_ports() {
-            Ok(ports) if ports.is_empty() => println!("No serial ports found."),
-            Ok(ports) => {
-                for p in ports {
-                    println!("{p}");
-                }
+        match discover_adapters() {
+            Ok(endpoints) => {
+                println!("{}", format_endpoint_list(&endpoints));
             }
             Err(e) => bail!("port scan failed: {e}"),
         }
@@ -103,7 +117,11 @@ fn main() -> Result<()> {
     let profile = load_profile(&args.profiles, &args.profile)?;
     let mut session = build_session(&args, profile)?;
     session.allow_writes = args.allow_writes;
-    session.init().context("adapter init failed")?;
+
+    // Live connect already runs init inside `connect()`. Replay still needs init.
+    if args.replay.is_some() {
+        session.init().context("adapter init failed")?;
+    }
 
     // Best-effort identity reads (replay and live).
     let mut boot_log = Vec::new();
@@ -120,7 +138,10 @@ fn main() -> Result<()> {
     for line in boot_log {
         app.push_log(line);
     }
-    if app.session.capabilities().ms_can {
+    let link = app.session.capabilities().link;
+    let ms_can = app.session.capabilities().ms_can;
+    app.push_log(format!("Link: {link}"));
+    if ms_can {
         app.push_log("Adapter reports MS-CAN capability.".into());
     } else {
         app.push_log("MS-CAN: not available on this adapter.".into());
@@ -139,10 +160,6 @@ fn load_profile(dir: &PathBuf, id: &str) -> Result<obd_io::VehicleProfile> {
     if let Some(p) = profiles.into_iter().find(|p| p.id == id) {
         return Ok(p);
     }
-    if id == "generic_j1979" {
-        return Ok(generic_profile());
-    }
-    // Fall back to generic if named file missing.
     Ok(generic_profile())
 }
 
@@ -154,24 +171,34 @@ fn build_session(args: &Args, profile: obd_io::VehicleProfile) -> Result<Vehicle
         return Ok(VehicleSession::new(Box::new(transport), profile, software));
     }
 
-    let port = match &args.port {
-        Some(p) => p.clone(),
-        None => {
-            let ports = discover_serial_ports().context("scan serial ports")?;
-            ports.into_iter().next().ok_or_else(|| {
-                anyhow::anyhow!("No serial OBD adapter found. Use --port or --replay.")
-            })?
-        }
+    let prefer: LinkPrefer = args
+        .prefer
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+
+    let opts = ConnectOptions {
+        path: args.port.clone(),
+        baud: args.baud,
+        prefer,
+        bt_mac: args.bt_mac.clone(),
+        rfcomm_index: args.rfcomm_index,
+        rfcomm_channel: args.rfcomm_channel,
+        timeout: Duration::from_millis(2_500),
+        default_bus: obd_io::BusTag::Hs,
+        skip_init: false,
     };
 
-    let config = ElmConfig {
-        path: port,
-        baud: args.baud,
-        timeout: Duration::from_millis(2_500),
-        default_bus: BusTag::Hs,
-    };
-    let transport = ElmTransport::new(config);
-    Ok(VehicleSession::new(Box::new(transport), profile, software))
+    let connected = connect(opts).context("connect to OBD adapter (USB or Bluetooth)")?;
+    eprintln!(
+        "Connected: {} ({}) @ {} baud",
+        connected.endpoint.path, connected.endpoint.kind, connected.baud
+    );
+
+    Ok(VehicleSession::new(
+        Box::new(connected.transport),
+        profile,
+        software,
+    ))
 }
 
 fn run_tui(app: &mut App) -> Result<()> {

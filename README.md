@@ -9,7 +9,8 @@ Linux OBD-II diagnostic TUI and reusable vehicle capture library.
 
 ## What it does
 
-- Connects to a USB OBD-II adapter (ELM327 / STN serial)
+- Connects to **USB serial** or **Bluetooth classic SPP** OBD adapters (same ELM/STN protocol)
+- Auto-detects endpoints; tries common baud rates per link type
 - Shows live Mode 01 PIDs, VIN, and diagnostic trouble codes
 - Saves **capture sessions** (raw frames + decoded signals) for other projects
 - Replays captures offline for tests and demos without a vehicle
@@ -41,33 +42,46 @@ sudo usermod -aG dialout "$USER"
 
 ## Quick start
 
-List ports (USB serial and `/dev/rfcomm*`):
+List USB and Bluetooth endpoints:
 
 ```sh
 obdtui --list-ports
 ```
 
-### Bluetooth adapter (classic SPP)
-
-Most Bluetooth OBD sticks speak the same ELM protocol as USB. The host sees a serial port after you pair and bind RFCOMM.
-
-1. Unblock Bluetooth if needed: `rfkill unblock bluetooth`
-2. Pair and trust the adapter (`bluetoothctl` or your desktop UI)
-3. Bind SPP (example; use your adapter MAC):
-
-```sh
-sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF
-obdtui --port /dev/rfcomm0
-```
-
-4. Release when done: `sudo rfcomm release 0`
-
-Typical baud for ELM over RFCOMM is still `38400` (default). If init fails, try `--baud 115200`.
-
-USB serial example:
+### USB (wired)
 
 ```sh
 obdtui --port /dev/ttyUSB0
+# or auto-detect (prefers USB when both exist):
+obdtui --prefer usb
+```
+
+### Bluetooth (classic SPP)
+
+Same ELM protocol as USB after RFCOMM is available.
+
+```sh
+rfkill unblock bluetooth
+# pair and trust once (bluetoothctl or desktop UI), then either:
+
+obdtui --bt-mac AA:BB:CC:DD:EE:FF
+# binds /dev/rfcomm0 when needed (may prompt for sudo)
+
+# or bind yourself:
+sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF
+obdtui --port /dev/rfcomm0 --prefer bluetooth
+```
+
+Release RFCOMM when done: `sudo rfcomm release 0`
+
+Baud: omit `--baud` to try `38400`, then `115200`, then `9600`. Force with `--baud 38400` if needed.
+
+Prefer one link type when both are present:
+
+```sh
+obdtui --prefer auto        # USB first, then Bluetooth
+obdtui --prefer usb
+obdtui --prefer bluetooth
 ```
 
 Replay sample (no truck):
