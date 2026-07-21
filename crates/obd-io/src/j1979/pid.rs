@@ -192,40 +192,78 @@ pub fn pid_supported_bitmap(response: &str, base: u8) -> Result<Vec<u8>> {
 
 /// Extract VIN ASCII from Mode 09 PID 02 multi-frame style responses.
 pub fn parse_vin(response: &str) -> Result<String> {
-    // Collect all hex digits, skip service/pid framing loosely.
-    let hex: String = response.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    // Common: 490201... or with frame indices.
-    // Strip leading 49 02 and optional 01 count / frame numbers by scanning for VIN charset.
+    // ELM may return multi-line or single-line with frame markers:
+    //   0: 49 02 01 31 46 54
+    //   1: 45 57 31 45 50 39 4B
+    // or jammed: 0140:4902013146541:4557314550394B2:46433733343939
+    let stripped = strip_elm_frame_markers(response);
+    let mut hex: String = stripped.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    // Drop ELM length prefix before service response (e.g. leading "014" before 4902).
+    if let Some(pos) = hex.to_ascii_uppercase().find("4902") {
+        hex = hex[pos..].to_string();
+    }
+    if hex.len() % 2 == 1 {
+        hex = hex[1..].to_string();
+    }
     if hex.len() < 6 {
         return Err(Error::Decode("VIN response too short".into()));
     }
 
-    // Try full decode: convert all bytes and keep printable VIN-like chars.
     let bytes = parse_hex_bytes(&hex)?;
-    let mut chars: Vec<u8> = Vec::new();
-    for b in bytes {
-        if b.is_ascii_uppercase() || b.is_ascii_digit() {
-            chars.push(b);
+    // Payload after positive response 0x49 0x02, optional count 0x01.
+    let payload = if let Some(i) = bytes.windows(2).position(|w| w == [0x49, 0x02]) {
+        let rest = &bytes[i + 2..];
+        if rest.first() == Some(&0x01) {
+            &rest[1..]
+        } else {
+            rest
         }
-    }
-    let s = String::from_utf8_lossy(&chars).to_string();
-    // VIN is 17 characters.
-    if let Some(vin) = extract_vin17(&s) {
-        return Ok(vin);
-    }
+    } else {
+        bytes.as_slice()
+    };
 
-    // Some adapters already return ASCII mixed.
-    let ascii: String = response
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
+    let s: String = payload
+        .iter()
+        .filter(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        .map(|b| *b as char)
         .collect();
-    if let Some(vin) = extract_vin17(&ascii) {
+    if let Some(vin) = extract_vin17(&s) {
         return Ok(vin);
     }
 
     Err(Error::Decode(format!(
         "could not parse VIN from: {response:?}"
     )))
+}
+
+/// Remove ELM ISO-TP frame indices like `0:`, `1:`, `014:` from a response blob.
+fn strip_elm_frame_markers(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        // Match 1–3 hex digits followed by ':'
+        let mut j = i;
+        while j < bytes.len() && j - i < 3 && bytes[j].is_ascii_hexdigit() {
+            j += 1;
+        }
+        if j > i && j < bytes.len() && bytes[j] == b':' {
+            // Only treat as frame marker if preceded by start/whitespace/newline
+            // or is near start of a frame group (always OK for ELM VIN dumps).
+            let prev_ok =
+                i == 0 || bytes[i - 1].is_ascii_whitespace() || !bytes[i - 1].is_ascii_hexdigit();
+            // For jammed "0140:" the prev digit is hex — still a marker if total looks like count+index.
+            // Prefer: any 1-digit index 0-9 before colon mid-stream is a frame index.
+            let single_digit_index = j - i == 1;
+            if prev_ok || single_digit_index {
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 fn extract_vin17(s: &str) -> Option<String> {
@@ -275,7 +313,6 @@ mod tests {
 
     #[test]
     fn vin_from_hex() {
-        // Minimal: "WVWZZZ..." style bytes after service
         let vin = "1FTFW1E50MFA00000";
         let mut hex = String::from("490201");
         for b in vin.bytes() {
@@ -283,5 +320,19 @@ mod tests {
         }
         let parsed = parse_vin(&hex).unwrap();
         assert_eq!(parsed, vin);
+    }
+
+    #[test]
+    fn vin_from_elm_multiline() {
+        let resp = "0: 49 02 01 31 46 54\n1: 45 57 31 45 50 39 4B\n2: 46 43 37 33 34 39 39";
+        let parsed = parse_vin(resp).unwrap();
+        assert_eq!(parsed, "1FTEW1EP9KFC73499");
+    }
+
+    #[test]
+    fn vin_from_elm_jammed_line() {
+        let resp = "0140:4902013146541:4557314550394B2:46433733343939";
+        let parsed = parse_vin(resp).unwrap();
+        assert_eq!(parsed, "1FTEW1EP9KFC73499");
     }
 }

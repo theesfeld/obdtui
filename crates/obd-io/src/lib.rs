@@ -18,6 +18,7 @@ pub use profile::{generic_profile, load_profiles_dir, VehicleProfile};
 pub use session::VehicleSession;
 pub use transport::{
     classify_path, connect, discover_adapters, discover_serial_ports, ensure_rfcomm,
-    format_endpoint_list, normalize_bt_mac, release_rfcomm, AdapterEndpoint, ConnectOptions,
-    ConnectedAdapter, ElmConfig, ElmTransport, Frame, FrameDir, ReplayTransport, Transport,
+    format_endpoint_list, normalize_bt_mac, release_rfcomm, AdapterEndpoint, BtSppTransport,
+    ConnectOptions, ConnectedAdapter, ElmConfig, ElmTransport, Frame, FrameDir, ReplayTransport,
+    Transport,
 };

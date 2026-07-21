@@ -1,10 +1,12 @@
 //! Transport abstraction for live adapters and replay.
 
+mod bt_spp;
 mod connect;
 mod elm;
 mod link;
 mod replay;
 
+pub use bt_spp::BtSppTransport;
 pub use connect::{
     connect, discover_adapters, discover_serial_ports, ensure_rfcomm, format_endpoint_list,
     release_rfcomm, ConnectOptions, ConnectedAdapter,
