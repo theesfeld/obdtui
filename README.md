@@ -3,8 +3,8 @@
 Linux OBD-II diagnostic TUI and reusable vehicle capture library.
 
 <!-- agents:status:begin -->
-> **Status:** Phase 0 bootstrap · Issue: [#1](https://github.com/theesfeld/obdtui/issues/1) · Version: `0.1.0-dev.1` · License: MIT  
-> Default mode is **read-only**. Bluetooth classic SPP uses RFCOMM serial. This is not a full FORScan replacement. 0.x may change interfaces.
+> **Status:** F1–F6 ramp · Issue: [#7](https://github.com/theesfeld/obdtui/issues/7) · Version: `0.1.0-dev.1` · License: MIT  
+> Full Mode 01 capture · vector gauges · MFD shell · read-only default · 0.x may change.
 <!-- agents:status:end -->
 
 ## What it does
@@ -96,12 +96,16 @@ obdtui --replay fixtures/sample-session
 | Key | Action |
 |-----|--------|
 | `q` / Esc | Quit |
-| `1`–`4` / Tab | Live / DTC / Log / Help |
+| `1`–`7` / Tab | Live / Gauges / MFD / DTC / Modules / Log / Help |
 | `p` | Toggle live poll |
-| `r` | Read DTCs |
-| `c` | Start or stop capture |
-| `b` | Cycle bus tag |
+| `r` | Read DTCs + freeze frame |
+| `c` | Start or stop **full Mode 01** capture |
+| `n` | Next single vector gauge |
+| `m` | Ford module read probes |
+| `b` | Cycle HS/MS bus (STN path) |
 | `x` | Clear DTCs (only with `--allow-writes`) |
+
+Capture records **all supported Mode 01 PIDs** plus raw frames (not only the table rows).
 
 ## Capture format (for other projects)
 

@@ -1,21 +1,57 @@
 id: ford_stub
-name: Ford (stub)
+name: Ford F-series (live-tuned stub)
 makes:
   - Ford
   - Lincoln
   - Mercury
 notes: >
-  Placeholder profile for Ford dual-bus work.
-  Fill modules and enhanced PIDs from real captures.
-  MS-CAN needs a capable adapter. Phase 0 does not program modules.
+  Tuned from live OBDLink MX+ capture on VIN 1FTEW1EP9KFC73499.
+  Full Mode 01 capture enumerates supported PIDs at runtime.
+  MS-CAN select uses STN protocol 53 when available.
 dual_bus: true
-pids: []
+pids:
+  - mode: 1
+    pid: 12
+    name: engine_rpm
+    unit: rpm
+    description: Engine RPM
+    bus: hs
+  - mode: 1
+    pid: 13
+    name: vehicle_speed
+    unit: km/h
+    description: Vehicle speed
+    bus: hs
+  - mode: 1
+    pid: 5
+    name: coolant_temp
+    unit: C
+    description: Coolant temperature
+    bus: hs
+  - mode: 1
+    pid: 15
+    name: intake_temp
+    unit: C
+    description: Intake air temperature
+    bus: hs
+  - mode: 1
+    pid: 17
+    name: throttle
+    unit: "%"
+    description: Throttle position
+    bus: hs
+  - mode: 1
+    pid: 4
+    name: engine_load
+    unit: "%"
+    description: Engine load
+    bus: hs
 modules:
   - id: pcm
     name: Powertrain Control Module
     bus: hs
-    notes: Read via standard OBD on HS-CAN when present.
+    notes: Standard OBD Mode 01/09 on HS-CAN.
   - id: bcm
     name: Body Control Module
     bus: ms
-    notes: Requires MS-CAN path. Not fully mapped in phase 0.
+    notes: MS-CAN path experimental via STP53.
