@@ -38,14 +38,15 @@
     </section>
 
     <section>
-      <h2>Bluetooth (classic SPP)</h2>
+      <h2>USB and Bluetooth</h2>
       <p>
-        Pair the adapter, bind RFCOMM, then open the serial node. The OBD protocol is the same as USB.
+        Wired USB serial and Bluetooth classic SPP use the same ELM protocol.
+        Auto-detect prefers USB when both are present. Use <code>--prefer</code> to choose.
       </p>
-      <pre><code>rfkill unblock bluetooth
-# pair and trust with bluetoothctl, then:
-sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF
-obdtui --port /dev/rfcomm0</code></pre>
+      <pre><code>obdtui --list-ports
+obdtui --prefer usb
+obdtui --bt-mac AA:BB:CC:DD:EE:FF
+obdtui --port /dev/rfcomm0 --prefer bluetooth</code></pre>
     </section>
 
     <section>

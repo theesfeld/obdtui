@@ -185,6 +185,10 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("This is a 0.x tool. Interfaces may change."),
         Line::from("This tool is not a full FORScan replacement."),
         Line::from("Default mode is read-only."),
+        Line::from("Links: USB serial and Bluetooth SPP (RFCOMM)."),
+        Line::from("  USB: obdtui --port /dev/ttyUSB0"),
+        Line::from("  BT:  obdtui --bt-mac AA:BB:CC:DD:EE:FF"),
+        Line::from("  or:  obdtui --port /dev/rfcomm0 --prefer bluetooth"),
     ];
     let p = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" Help "))

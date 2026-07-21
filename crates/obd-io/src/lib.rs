@@ -10,12 +10,14 @@ pub mod profile;
 pub mod session;
 pub mod transport;
 
-pub use bus::{AdapterCapabilities, BusTag};
+pub use bus::{AdapterCapabilities, BusTag, LinkKind, LinkPrefer};
 pub use capture::{CaptureSession, SessionMeta, SignalSample, CAPTURE_FORMAT_VERSION};
 pub use error::{Error, Result};
 pub use j1979::{Dtc, DtcStatus, LiveValue, PidDef};
 pub use profile::{generic_profile, load_profiles_dir, VehicleProfile};
 pub use session::VehicleSession;
 pub use transport::{
-    discover_serial_ports, ElmConfig, ElmTransport, Frame, FrameDir, ReplayTransport, Transport,
+    classify_path, connect, discover_adapters, discover_serial_ports, ensure_rfcomm,
+    format_endpoint_list, normalize_bt_mac, release_rfcomm, AdapterEndpoint, ConnectOptions,
+    ConnectedAdapter, ElmConfig, ElmTransport, Frame, FrameDir, ReplayTransport, Transport,
 };

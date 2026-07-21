@@ -12,7 +12,9 @@ pub enum Error {
     #[error("serial port error: {0}")]
     Serial(#[from] serialport::Error),
 
-    #[error("no serial OBD adapter found")]
+    #[error(
+        "no OBD adapter found (USB serial or Bluetooth RFCOMM). Use --list-ports, --port, or --bt-mac"
+    )]
     NoAdapter,
 
     #[error("adapter init failed: {0}")]

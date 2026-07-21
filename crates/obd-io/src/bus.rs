@@ -1,7 +1,95 @@
-//! Bus tags for dual-bus capture (HS-CAN / MS-CAN).
+//! Bus tags for dual-bus capture (HS-CAN / MS-CAN) and host link kind.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
+
+/// Host link type for an OBD adapter (USB serial vs Bluetooth SPP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    /// USB CDC / USB-serial (FTDI, CH340, CP210x, etc.).
+    UsbSerial,
+    /// Bluetooth classic Serial Port Profile via RFCOMM.
+    BluetoothSpp,
+    /// Other or unclassified serial path.
+    #[default]
+    Other,
+}
+
+impl LinkKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LinkKind::UsbSerial => "usb",
+            LinkKind::BluetoothSpp => "bluetooth",
+            LinkKind::Other => "other",
+        }
+    }
+
+    /// Typical baud rates to try for this link (first is preferred).
+    pub fn default_bauds(self) -> &'static [u32] {
+        match self {
+            LinkKind::UsbSerial => &[38400, 115200, 9600],
+            LinkKind::BluetoothSpp => &[38400, 115200, 9600],
+            LinkKind::Other => &[38400, 115200, 9600],
+        }
+    }
+}
+
+impl fmt::Display for LinkKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for LinkKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "usb" | "usb_serial" | "wired" | "serial" => Ok(LinkKind::UsbSerial),
+            "bluetooth" | "bt" | "spp" | "rfcomm" | "bluetooth_spp" => Ok(LinkKind::BluetoothSpp),
+            "other" | "auto" => Ok(LinkKind::Other),
+            other => Err(format!("unknown link kind: {other}")),
+        }
+    }
+}
+
+/// Preference when auto-selecting among discovered endpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkPrefer {
+    /// Prefer any working endpoint; USB first, then Bluetooth.
+    #[default]
+    Auto,
+    /// Prefer USB serial endpoints.
+    Usb,
+    /// Prefer Bluetooth RFCOMM endpoints.
+    Bluetooth,
+}
+
+impl FromStr for LinkPrefer {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "auto" => Ok(LinkPrefer::Auto),
+            "usb" | "wired" => Ok(LinkPrefer::Usb),
+            "bluetooth" | "bt" | "spp" => Ok(LinkPrefer::Bluetooth),
+            other => Err(format!("unknown prefer: {other} (auto|usb|bluetooth)")),
+        }
+    }
+}
+
+impl fmt::Display for LinkPrefer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LinkPrefer::Auto => write!(f, "auto"),
+            LinkPrefer::Usb => write!(f, "usb"),
+            LinkPrefer::Bluetooth => write!(f, "bluetooth"),
+        }
+    }
+}
 
 /// Vehicle bus tag for capture and transport metadata.
 ///
@@ -59,6 +147,9 @@ pub struct AdapterCapabilities {
     pub stn: bool,
     /// Adapter can address MS-CAN (Ford dual-bus). Phase 0 may remain false.
     pub ms_can: bool,
+    /// Host link: USB serial or Bluetooth SPP.
+    #[serde(default)]
+    pub link: LinkKind,
     /// Free-text adapter identity (ATI / STDI).
     pub identity: String,
     /// Active protocol string from ATDP if known.
@@ -80,6 +171,6 @@ impl AdapterCapabilities {
         } else {
             "MS-CAN: no"
         };
-        format!("{kind} · {ms} · {}", self.identity)
+        format!("{kind} · {} · {ms} · {}", self.link, self.identity)
     }
 }

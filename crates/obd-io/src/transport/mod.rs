@@ -1,9 +1,16 @@
 //! Transport abstraction for live adapters and replay.
 
+mod connect;
 mod elm;
+mod link;
 mod replay;
 
-pub use elm::{discover_serial_ports, ElmConfig, ElmTransport};
+pub use connect::{
+    connect, discover_adapters, discover_serial_ports, ensure_rfcomm, format_endpoint_list,
+    release_rfcomm, ConnectOptions, ConnectedAdapter,
+};
+pub use elm::{ElmConfig, ElmTransport};
+pub use link::{classify_path, normalize_bt_mac, AdapterEndpoint};
 pub use replay::ReplayTransport;
 
 use crate::bus::{AdapterCapabilities, BusTag};
@@ -75,8 +82,5 @@ pub trait Transport: Send {
     fn init(&mut self) -> Result<()>;
 
     /// Send a command and wait for a full response (without `>`).
-    ///
-    /// Implementations should also produce frames via optional callbacks or
-    /// by returning data only; session layer records frames.
     fn transact(&mut self, command: &str) -> Result<String>;
 }

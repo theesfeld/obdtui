@@ -1,7 +1,8 @@
-//! ELM327 / STN serial transport.
+//! ELM327 / STN serial transport (USB or Bluetooth RFCOMM).
 
+use super::link::classify_path;
 use super::Transport;
-use crate::bus::{AdapterCapabilities, BusTag};
+use crate::bus::{AdapterCapabilities, BusTag, LinkKind};
 use crate::error::{Error, Result};
 use serialport::SerialPort;
 use std::io::{Read, Write};
@@ -16,6 +17,8 @@ pub struct ElmConfig {
     pub timeout: Duration,
     /// Force bus tag for captures when only one bus is visible.
     pub default_bus: BusTag,
+    /// Host link kind (USB vs Bluetooth SPP).
+    pub link: LinkKind,
 }
 
 impl Default for ElmConfig {
@@ -25,11 +28,12 @@ impl Default for ElmConfig {
             baud: 38400,
             timeout: Duration::from_millis(2_000),
             default_bus: BusTag::Hs,
+            link: LinkKind::Other,
         }
     }
 }
 
-/// Live ELM327/STN adapter over a USB serial port.
+/// Live ELM327/STN adapter over USB serial or Bluetooth SPP (RFCOMM).
 pub struct ElmTransport {
     config: ElmConfig,
     port: Option<Box<dyn SerialPort>>,
@@ -38,7 +42,10 @@ pub struct ElmTransport {
 }
 
 impl ElmTransport {
-    pub fn new(config: ElmConfig) -> Self {
+    pub fn new(mut config: ElmConfig) -> Self {
+        if config.link == LinkKind::Other && !config.path.is_empty() {
+            config.link = classify_path(&config.path);
+        }
         let active_bus = config.default_bus;
         Self {
             config,
@@ -48,10 +55,23 @@ impl ElmTransport {
         }
     }
 
+    pub fn link_kind(&self) -> LinkKind {
+        self.config.link
+    }
+
     /// Open the configured serial path without full OBD init.
     pub fn open(&mut self) -> Result<()> {
         if self.config.path.is_empty() {
             return Err(Error::NoAdapter);
+        }
+        if self.config.link == LinkKind::Other {
+            self.config.link = classify_path(&self.config.path);
+        }
+        // Bluetooth SPP benefits from a longer default timeout.
+        if self.config.link == LinkKind::BluetoothSpp
+            && self.config.timeout < Duration::from_millis(3_500)
+        {
+            self.config.timeout = Duration::from_millis(4_000);
         }
         let port = serialport::new(&self.config.path, self.config.baud)
             .timeout(self.config.timeout)
@@ -170,9 +190,14 @@ impl Transport for ElmTransport {
             let _ = port.clear(serialport::ClearBuffer::All);
         }
 
-        // Soft reset and basic ELM setup.
+        // Soft reset and basic ELM setup. Bluetooth needs a longer settle.
+        let settle = if self.config.link == LinkKind::BluetoothSpp {
+            Duration::from_millis(1_200)
+        } else {
+            Duration::from_millis(500)
+        };
         let _ = self.at_command("ATZ");
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(settle);
         // After ATZ some adapters re-print banner without waiting; send CR.
         let _ = self.write_raw(b"\r");
         let _ = self.read_until_prompt();
@@ -199,6 +224,7 @@ impl Transport for ElmTransport {
             elm_compatible: !identity.is_empty(),
             stn,
             ms_can,
+            link: self.config.link,
             identity: identity.trim().to_string(),
             protocol: protocol.trim().to_string(),
         };
@@ -219,44 +245,6 @@ impl Transport for ElmTransport {
         }
         self.at_command(cmd)
     }
-}
-
-/// List likely OBD serial devices: USB-serial and Bluetooth RFCOMM.
-pub fn discover_serial_ports() -> Result<Vec<String>> {
-    let ports = serialport::available_ports().map_err(Error::Serial)?;
-    let mut out: Vec<String> = ports
-        .into_iter()
-        .map(|p| p.port_name)
-        .filter(|name| is_likely_obd_port(name))
-        .collect();
-
-    // Also scan common RFCOMM device nodes (may not appear in serialport enum).
-    for n in 0..8 {
-        let path = format!("/dev/rfcomm{n}");
-        if std::path::Path::new(&path).exists() && !out.iter().any(|p| p == &path) {
-            out.push(path);
-        }
-    }
-
-    out.sort();
-    if out.is_empty() {
-        // Fall back to all ports so the user can pick.
-        let ports = serialport::available_ports().map_err(Error::Serial)?;
-        out = ports.into_iter().map(|p| p.port_name).collect();
-        out.sort();
-    }
-    Ok(out)
-}
-
-fn is_likely_obd_port(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    n.contains("ttyusb")
-        || n.contains("ttyacm")
-        || n.contains("cu.usb")
-        || n.contains("usbserial")
-        || n.contains("rfcomm")
-        || n.contains("obd")
-        || n.contains("serial")
 }
 
 fn clean_response(raw: &str) -> String {

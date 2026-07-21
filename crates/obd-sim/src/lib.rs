@@ -1,6 +1,6 @@
 //! Sample capture builders and re-exports for offline OBD work.
 
-use obd_io::bus::{AdapterCapabilities, BusTag};
+use obd_io::bus::{AdapterCapabilities, BusTag, LinkKind};
 use obd_io::capture::CaptureSession;
 use obd_io::transport::{Frame, ReplayTransport};
 use obd_io::Result;
@@ -15,6 +15,7 @@ pub fn sample_session() -> CaptureSession {
         elm_compatible: true,
         stn: false,
         ms_can: false,
+        link: LinkKind::Other,
         identity: "ELM327 SAMPLE".into(),
         protocol: "ISO 15765-4 (CAN 11/500)".into(),
     };
@@ -94,12 +95,10 @@ mod tests {
     fn sample_replay_reads_rpm() {
         let dir = tempfile::tempdir().unwrap();
         let mut session = sample_session();
-        // Enough responses for init-less direct read path via replay queue order
         session.save(dir.path()).unwrap();
         let transport = ReplayTransport::from_path(dir.path()).unwrap();
         let mut vs = VehicleSession::new(Box::new(transport), generic_profile(), "obd-sim-test");
         vs.init().unwrap();
-        // Queue is TX-order responses; first few are ATI/ATDP/VIN/etc.
         let _ = vs.raw("ATI");
         let _ = vs.raw("ATDP");
         let vin = vs.read_vin().unwrap();
