@@ -7,19 +7,23 @@ Linux OBD-II diagnostic TUI and reusable vehicle capture library.
 > Full Mode 01 capture · vector gauges · MFD shell · read-only default · 0.x may change.
 <!-- agents:status:end -->
 
-## Vector MFD (real 2D graphics)
+## VECTOR HUD (F-16 style — real 2D lines)
 
-Terminal gauges are limited. For fighter-style **vector** arcs and lines, use the windowed HUD:
+Terminal cells cannot draw proper vectors. Use the windowed HUD:
 
 ```sh
-# live truck
+# live truck (quit obdtui first if it holds Bluetooth)
 cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1
 
-# offline replay
+# offline
 cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live
 ```
 
-`obd-mfd` opens a GPU window (egui) and draws real strokes — green phosphor HUD, amber/red warnings, reticle, scanlines (click to toggle). This is the path toward an in-cab MFD, not the text TUI.
+**Symbology (vector strokes):** pitch ladder, horizon, velocity vector, gun cross,
+SPD/RPM tapes, AoA bracket, heading tape, radar/sonar PPI with sweep, FOV brackets.
+Phosphor green + amber/red warnings. Click toggles scanlines.
+
+`obdtui` tab **2 HUD** only points here — the real VECTOR display is `obd-mfd`.
 
 ## What it does
 
@@ -110,11 +114,10 @@ obdtui --replay fixtures/sample-session
 | Key | Action |
 |-----|--------|
 | `q` / Esc | Quit |
-| `1`–`7` / Tab | Live / Gauges / MFD / DTC / Modules / Log / Help |
+| `1`–`6` / Tab | Live / HUD / DTC / Modules / Log / Help |
 | `p` | Toggle live poll |
 | `r` | Read DTCs + freeze frame |
 | `c` | Start or stop **full Mode 01** capture |
-| `n` | Next single vector gauge |
 | `m` | Ford module read probes |
 | `b` | Cycle HS/MS bus (STN path) |
 | `x` | Clear DTCs (only with `--allow-writes`) |

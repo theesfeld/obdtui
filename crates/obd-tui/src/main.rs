@@ -1,7 +1,6 @@
 //! obdtui — OBD-II diagnostic terminal UI (F1–F6 ramp).
 
 mod app;
-mod gauges;
 mod ui;
 
 use anyhow::{bail, Context, Result};
@@ -26,10 +25,11 @@ use crate::app::{App, Tab};
 #[derive(Parser, Debug)]
 #[command(
     name = "obdtui",
-    about = "OBD-II TUI: full Mode 01 capture, vector gauges, MFD shell.",
+    about = "OBD-II TUI: full Mode 01 capture + text console. VECTOR HUD = obd-mfd.",
     version,
     long_about = "USB serial or Bluetooth SPP. Default mode is read-only.\n\
 Full capture polls all supported Mode 01 PIDs.\n\
+For F-16 style VECTOR HUD: cargo run -p obd-mfd\n\
 0.x releases may change interfaces."
 )]
 struct Args {
@@ -280,14 +280,12 @@ fn run_tui(app: &mut App) -> Result<()> {
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
                         KeyCode::Char('1') => app.tab = Tab::Live,
-                        KeyCode::Char('2') => app.tab = Tab::Gauges,
-                        KeyCode::Char('3') => app.tab = Tab::Mfd,
-                        KeyCode::Char('4') => app.tab = Tab::Dtc,
-                        KeyCode::Char('5') => app.tab = Tab::Modules,
-                        KeyCode::Char('6') => app.tab = Tab::Log,
-                        KeyCode::Char('7') | KeyCode::Char('h') => app.tab = Tab::Help,
+                        KeyCode::Char('2') => app.tab = Tab::Hud,
+                        KeyCode::Char('3') => app.tab = Tab::Dtc,
+                        KeyCode::Char('4') => app.tab = Tab::Modules,
+                        KeyCode::Char('5') => app.tab = Tab::Log,
+                        KeyCode::Char('6') | KeyCode::Char('h') => app.tab = Tab::Help,
                         KeyCode::Char('r') => app.refresh_dtcs(),
-                        KeyCode::Char('n') => app.next_gauge(),
                         KeyCode::Char('m') => app.probe_modules(),
                         KeyCode::Char('p') => {
                             app.live_poll = !app.live_poll;
@@ -309,10 +307,10 @@ fn run_tui(app: &mut App) -> Result<()> {
                 // Always one priority PID (gauges). When capturing, one bulk PID after.
                 // Never do a full multi-PID sweep in one iteration (that made gauges lag).
                 app.poll_priority();
-                let gauges_focus = matches!(app.tab, Tab::Gauges | Tab::Mfd);
                 if app.capturing {
-                    // On gauge/MFD tabs, skip bulk half the time so rpm/speed update faster.
-                    let do_bulk = if gauges_focus {
+                    // On HUD pointer tab, still prefer priority rate slightly.
+                    let hud_focus = matches!(app.tab, Tab::Hud);
+                    let do_bulk = if hud_focus {
                         app.bulk_flip = !app.bulk_flip;
                         app.bulk_flip
                     } else {
