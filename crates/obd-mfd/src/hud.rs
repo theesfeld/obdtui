@@ -195,7 +195,7 @@ fn warn_coolant(v: f32) -> Color32 {
 }
 
 fn warn_volt(v: f32) -> Color32 {
-    if v < 11.5 || v > 15.2 {
+    if !(11.5..=15.2).contains(&v) {
         RED
     } else if v < 12.2 {
         AMBER
