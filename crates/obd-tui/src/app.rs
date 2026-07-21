@@ -32,6 +32,8 @@ pub struct App {
     pub gauge_index: usize,
     pub module_lines: Vec<String>,
     pub freeze_lines: Vec<String>,
+    /// Alternate bulk capture steps when gauges/MFD need max priority rate.
+    pub bulk_flip: bool,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             gauge_index: 0,
             module_lines: Vec::new(),
             freeze_lines: Vec::new(),
+            bulk_flip: false,
         }
     }
 
@@ -95,18 +98,41 @@ impl App {
         };
     }
 
-    pub fn poll_live(&mut self) {
-        match self.session.poll_for_ui_and_capture() {
-            Ok(values) => {
-                if !values.is_empty() {
-                    self.live = values;
-                    self.last_error = None;
-                }
-            }
+    /// Merge new samples into live list by signal name (keeps gauges instant).
+    fn merge_live(&mut self, values: Vec<LiveValue>) {
+        if values.is_empty() {
+            return;
+        }
+        let mut map: HashMap<String, LiveValue> =
+            self.live.drain(..).map(|v| (v.name.clone(), v)).collect();
+        for v in values {
+            map.insert(v.name.clone(), v);
+        }
+        let mut merged: Vec<LiveValue> = map.into_values().collect();
+        merged.sort_by(|a, b| a.pid.cmp(&b.pid).then_with(|| a.name.cmp(&b.name)));
+        self.live = merged;
+        self.last_error = None;
+    }
+
+    /// One priority PID (fastest gauge path — ~1 BT round-trip).
+    pub fn poll_priority(&mut self) {
+        match self.session.poll_priority_step(1) {
+            Ok(values) => self.merge_live(values),
             Err(e) => {
-                let msg = format!("poll failed: {e}");
-                self.last_error = Some(msg.clone());
-                self.push_log(msg);
+                self.last_error = Some(format!("priority poll: {e}"));
+            }
+        }
+    }
+
+    /// One bulk PID while full capture is on (does not replace priority updates).
+    pub fn poll_bulk_capture_step(&mut self) {
+        if !self.capturing || !self.session.full_capture {
+            return;
+        }
+        match self.session.poll_bulk_step(1) {
+            Ok(values) => self.merge_live(values),
+            Err(e) => {
+                self.last_error = Some(format!("bulk capture: {e}"));
             }
         }
     }

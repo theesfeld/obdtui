@@ -161,16 +161,24 @@ fn draw_gauges(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(single, inner);
 
     // Row of mini gauges
-    let n = gauges.len().min(4);
+    let n = gauges.len().clamp(1, 4);
+    if chunks[1].width < 8 || chunks[1].height < 4 {
+        return;
+    }
     let row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Percentage(100 / n as u16); n])
+        .constraints(vec![Constraint::Ratio(1, n as u32); n])
         .split(chunks[1]);
     for (i, g) in gauges.into_iter().take(n).enumerate() {
+        if i >= row.len() {
+            break;
+        }
         let b = Block::default().borders(Borders::ALL);
         let inn = b.inner(row[i]);
         f.render_widget(b, row[i]);
-        f.render_widget(g, inn);
+        if inn.width >= 6 && inn.height >= 3 {
+            f.render_widget(g, inn);
+        }
     }
 }
 
@@ -179,47 +187,50 @@ fn draw_mfd(f: &mut Frame, area: Rect, app: &App) {
     let outer = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(" MFD · vector HUD shell (F6) ");
+        .title(" MFD · vector HUD (live priority PIDs) ");
     let inner = outer.inner(area);
     f.render_widget(outer, area);
+
+    // Guard tiny terminals — no nested splits that can panic/zero-size.
+    if inner.width < 24 || inner.height < 10 {
+        f.render_widget(
+            Paragraph::new("MFD needs a larger terminal (min ~24x10).")
+                .style(Style::default().fg(Color::Yellow)),
+            inner,
+        );
+        return;
+    }
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
         ])
         .split(inner);
 
     let left = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
         .split(cols[0]);
     let center = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(55),
-            Constraint::Percentage(25),
-            Constraint::Percentage(20),
+            Constraint::Min(5),
+            Constraint::Length(3),
+            Constraint::Length(2),
         ])
         .split(cols[1]);
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
         .split(cols[2]);
 
     let get = |k: &str| map.get(k).copied().unwrap_or(0.0);
 
     f.render_widget(
-        ArcGauge {
-            label: "RPM".into(),
-            value: get("engine_rpm"),
-            min: 0.0,
-            max: 7000.0,
-            unit: "rpm".into(),
-            accent: Color::Cyan,
-        },
+        ArcGauge::new("RPM", get("engine_rpm"), 0.0, 7000.0, "rpm"),
         left[0],
     );
     f.render_widget(
@@ -255,8 +266,8 @@ fn draw_mfd(f: &mut Frame, area: Rect, app: &App) {
         center[1],
     );
     let strip = format!(
-        "VIN {}  BUS {}  CAP {}  SIG {}",
-        app.session.vin.as_deref().unwrap_or("—"),
+        "VIN {}  BUS {}  CAP {}  SIG {}  poll LIVE",
+        app.session.vin.as_deref().unwrap_or("-"),
         app.session.active_bus(),
         if app.capturing { "FULL" } else { "off" },
         app.live.len()

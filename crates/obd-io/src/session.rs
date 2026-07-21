@@ -28,8 +28,12 @@ pub struct VehicleSession {
     software: String,
     /// When false (default), clear-DTC is refused.
     pub allow_writes: bool,
-    /// When capturing, poll every supported Mode 01 PID (F1 full capture).
+    /// When capturing, also walk bulk Mode 01 PIDs (F1 full capture).
     pub full_capture: bool,
+    /// Cursor into bulk PID list for non-blocking incremental full capture.
+    bulk_cursor: usize,
+    /// Cursor into priority PID list for one-at-a-time live gauge updates.
+    priority_cursor: usize,
 }
 
 impl VehicleSession {
@@ -50,6 +54,8 @@ impl VehicleSession {
             software: software.into(),
             allow_writes: false,
             full_capture: true,
+            bulk_cursor: 0,
+            priority_cursor: 0,
         }
     }
 
@@ -203,10 +209,9 @@ impl VehicleSession {
         self.transact_recorded("0101")
     }
 
-    /// Priority dashboard poll (fast set).
-    pub fn poll_dashboard(&mut self) -> Result<Vec<LiveValue>> {
-        let mut out = Vec::new();
-        let pids: Vec<u8> = if self.supported_pids.is_empty() {
+    fn priority_pid_list(&self) -> Vec<u8> {
+        // Weight rpm/speed/throttle so gauges feel live (appear more often in round-robin).
+        let base: Vec<u8> = if self.supported_pids.is_empty() {
             priority_pids().to_vec()
         } else {
             priority_pids()
@@ -215,43 +220,75 @@ impl VehicleSession {
                 .filter(|p| self.supported_pids.contains(p))
                 .collect()
         };
-        for pid in pids {
-            if let Ok(v) = self.read_pid(pid) {
-                out.push(v);
+        let base = if base.is_empty() {
+            vec![0x0C, 0x0D, 0x04, 0x11, 0x05]
+        } else {
+            base
+        };
+        let mut weighted = Vec::new();
+        for &p in &base {
+            weighted.push(p);
+            // Double-weight the most gauge-critical PIDs.
+            if matches!(p, 0x0C | 0x0D | 0x11 | 0x04) {
+                weighted.push(p);
             }
         }
-        if out.is_empty() {
-            for pid in [0x0C, 0x0D, 0x05, 0x11] {
-                if let Ok(v) = self.read_pid(pid) {
-                    out.push(v);
-                }
+        weighted
+    }
+
+    /// Priority dashboard poll (all priority PIDs — slower; prefer `poll_priority_step`).
+    pub fn poll_dashboard(&mut self) -> Result<Vec<LiveValue>> {
+        let mut out = Vec::new();
+        for pid in self.priority_pid_list() {
+            if let Ok(v) = self.read_pid(pid) {
+                out.push(v);
             }
         }
         Ok(out)
     }
 
-    /// Full Mode 01 poll of every supported PID (F1). Used when capturing.
+    /// Poll `max_pids` priority signals (round-robin). One PID ≈ one BT RTT — keep max=1 for live gauges.
+    pub fn poll_priority_step(&mut self, max_pids: usize) -> Result<Vec<LiveValue>> {
+        if max_pids == 0 {
+            return Ok(Vec::new());
+        }
+        let list = self.priority_pid_list();
+        if list.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.priority_cursor >= list.len() {
+            self.priority_cursor = 0;
+        }
+        let mut out = Vec::new();
+        for _ in 0..max_pids {
+            let pid = list[self.priority_cursor % list.len()];
+            self.priority_cursor = (self.priority_cursor + 1) % list.len();
+            if let Ok(v) = self.read_pid(pid) {
+                out.push(v);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Bulk (non-priority) supported PIDs for incremental full capture.
+    pub fn bulk_pids(&self) -> Vec<u8> {
+        self.supported_pids
+            .iter()
+            .copied()
+            .filter(|p| {
+                !priority_pids().contains(p)
+                    && !matches!(p, 0x00 | 0x20 | 0x40 | 0x60 | 0x80 | 0xA0 | 0xC0)
+            })
+            .collect()
+    }
+
+    /// Full Mode 01 poll of every supported PID (blocking; prefer `poll_bulk_step`).
     pub fn poll_full(&mut self) -> Result<Vec<LiveValue>> {
         if self.supported_pids.is_empty() {
             let _ = self.probe_supported_pids();
         }
-        let mut out = Vec::new();
-        // Always include priority first for fresher critical signals.
-        for &pid in priority_pids() {
-            if self.supported_pids.is_empty() || self.supported_pids.contains(&pid) {
-                if let Ok(v) = self.read_pid(pid) {
-                    out.push(v);
-                }
-            }
-        }
-        for &pid in &self.supported_pids.clone() {
-            if priority_pids().contains(&pid) {
-                continue;
-            }
-            // Skip pure support PIDs
-            if matches!(pid, 0x00 | 0x20 | 0x40 | 0x60 | 0x80 | 0xA0 | 0xC0) {
-                continue;
-            }
+        let mut out = self.poll_dashboard()?;
+        for pid in self.bulk_pids() {
             if let Ok(v) = self.read_pid(pid) {
                 out.push(v);
             }
@@ -259,13 +296,38 @@ impl VehicleSession {
         Ok(out)
     }
 
-    /// One capture tick: full or dashboard depending on `full_capture`.
-    pub fn poll_for_ui_and_capture(&mut self) -> Result<Vec<LiveValue>> {
-        if self.capture.is_some() && self.full_capture {
-            self.poll_full()
-        } else {
-            self.poll_dashboard()
+    /// Poll up to `max_pids` bulk signals (non-blocking full-capture step).
+    ///
+    /// Priority PIDs are **not** included — call `poll_dashboard` on a fast timer
+    /// so gauges stay live while bulk capture walks the rest.
+    pub fn poll_bulk_step(&mut self, max_pids: usize) -> Result<Vec<LiveValue>> {
+        if max_pids == 0 {
+            return Ok(Vec::new());
         }
+        if self.supported_pids.is_empty() {
+            let _ = self.probe_supported_pids();
+        }
+        let bulk = self.bulk_pids();
+        if bulk.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.bulk_cursor >= bulk.len() {
+            self.bulk_cursor = 0;
+        }
+        let mut out = Vec::new();
+        for _ in 0..max_pids {
+            let pid = bulk[self.bulk_cursor % bulk.len()];
+            self.bulk_cursor = (self.bulk_cursor + 1) % bulk.len();
+            if let Ok(v) = self.read_pid(pid) {
+                out.push(v);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Fast path for UI gauges: priority PIDs only.
+    pub fn poll_for_ui_and_capture(&mut self) -> Result<Vec<LiveValue>> {
+        self.poll_dashboard()
     }
 
     pub fn read_dtcs(&mut self) -> Result<Vec<Dtc>> {
