@@ -19,7 +19,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, stdout};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::app::{App, Tab};
 
@@ -265,27 +265,18 @@ fn run_tui(app: &mut App) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let tick = Duration::from_millis(200);
-    let mut last_poll = Instant::now() - Duration::from_secs(10);
-    // Full capture is slower — give more time between full sweeps
-    let poll_every = Duration::from_millis(if app.session.full_capture { 1200 } else { 800 });
-
+    // One OBD PID per loop iteration, then redraw — gauges track as fast as BT allows.
+    // Drain keys without blocking so tab switch never waits on a multi-PID sweep.
     let result = (|| -> Result<()> {
         loop {
-            terminal.draw(|f| ui::draw(f, app))?;
-
-            if app.live_poll && last_poll.elapsed() >= poll_every {
-                app.poll_live();
-                last_poll = Instant::now();
-            }
-
-            if event::poll(tick)? {
+            // Handle keys first (tab switch is never stuck behind full capture).
+            while event::poll(Duration::from_millis(0))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
                         KeyCode::Char('1') => app.tab = Tab::Live,
@@ -313,8 +304,28 @@ fn run_tui(app: &mut App) -> Result<()> {
                     }
                 }
             }
+
+            if app.live_poll {
+                // Always one priority PID (gauges). When capturing, one bulk PID after.
+                // Never do a full multi-PID sweep in one iteration (that made gauges lag).
+                app.poll_priority();
+                let gauges_focus = matches!(app.tab, Tab::Gauges | Tab::Mfd);
+                if app.capturing {
+                    // On gauge/MFD tabs, skip bulk half the time so rpm/speed update faster.
+                    let do_bulk = if gauges_focus {
+                        app.bulk_flip = !app.bulk_flip;
+                        app.bulk_flip
+                    } else {
+                        true
+                    };
+                    if do_bulk {
+                        app.poll_bulk_capture_step();
+                    }
+                }
+            }
+
+            terminal.draw(|f| ui::draw(f, app))?;
         }
-        Ok(())
     })();
 
     disable_raw_mode()?;
