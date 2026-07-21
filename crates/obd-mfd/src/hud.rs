@@ -41,11 +41,7 @@ impl eframe::App for HudApp {
                 let painter = ui.painter_at(rect);
 
                 // Outer bezel
-                painter.rect_stroke(
-                    rect.shrink(6.0),
-                    2.0,
-                    Stroke::new(1.5_f32, GREEN_DIM),
-                );
+                painter.rect_stroke(rect.shrink(6.0), 2.0, Stroke::new(1.5_f32, GREEN_DIM));
 
                 // Header strip
                 draw_header(&painter, rect, &tele);
@@ -76,7 +72,10 @@ impl eframe::App for HudApp {
                 // Gauges — real arcs
                 let g = |c: u32, r: u32| {
                     Rect::from_min_size(
-                        Pos2::new(body.left() + c as f32 * cell_w, body.top() + r as f32 * cell_h),
+                        Pos2::new(
+                            body.left() + c as f32 * cell_w,
+                            body.top() + r as f32 * cell_h,
+                        ),
                         Vec2::new(cell_w, cell_h),
                     )
                     .shrink(12.0)
@@ -151,11 +150,7 @@ impl eframe::App for HudApp {
                         min: if volt > 0.5 { 10.0 } else { -20.0 },
                         max: if volt > 0.5 { 16.0 } else { 80.0 },
                         unit: if volt > 0.5 { "V" } else { "C" },
-                        color: if volt > 0.5 {
-                            warn_volt(volt)
-                        } else {
-                            GREEN
-                        },
+                        color: if volt > 0.5 { warn_volt(volt) } else { GREEN },
                     },
                 );
 
@@ -326,15 +321,7 @@ fn draw_arc_gauge(painter: &egui::Painter, g: ArcSpec<'_>) {
         0.0
     };
     let end = PI - frac * PI;
-    stroke_arc(
-        painter,
-        c,
-        radius,
-        PI,
-        end,
-        Stroke::new(3.0_f32, color),
-        48,
-    );
+    stroke_arc(painter, c, radius, PI, end, Stroke::new(3.0_f32, color), 48);
 
     for i in 0..=10 {
         let t = i as f32 / 10.0;
