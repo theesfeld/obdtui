@@ -4,13 +4,14 @@ use chrono::Local;
 use obd_io::{
     apply_stn_bus, ford_module_probes, probe_modules, BusTag, Dtc, LiveValue, VehicleSession,
 };
+use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Live,
-    /// Text stand-in only — real VECTOR HUD is `obd-mfd`.
+    /// VECTOR HUD drawn with terminal Braille canvas lines.
     Hud,
     Dtc,
     Modules,
@@ -33,6 +34,10 @@ pub struct App {
     pub freeze_lines: Vec<String>,
     /// Alternate bulk capture steps when HUD focus needs max priority rate.
     pub bulk_flip: bool,
+    /// Live data table selection / scroll.
+    pub live_table: TableState,
+    /// Visible row budget last drawn (for PageUp/Down).
+    pub live_page_rows: usize,
 }
 
 impl App {
@@ -56,6 +61,51 @@ impl App {
             module_lines: Vec::new(),
             freeze_lines: Vec::new(),
             bulk_flip: false,
+            live_table: TableState::default().with_selected(Some(0)),
+            live_page_rows: 10,
+        }
+    }
+
+    /// Clamp selection after live list changes.
+    pub fn clamp_live_selection(&mut self) {
+        let n = self.live.len();
+        if n == 0 {
+            self.live_table.select(None);
+            return;
+        }
+        let i = self.live_table.selected().unwrap_or(0).min(n - 1);
+        self.live_table.select(Some(i));
+    }
+
+    pub fn live_scroll_by(&mut self, delta: i32) {
+        let n = self.live.len();
+        if n == 0 {
+            self.live_table.select(None);
+            return;
+        }
+        let cur = self.live_table.selected().unwrap_or(0) as i32;
+        let next = (cur + delta).clamp(0, (n as i32) - 1) as usize;
+        self.live_table.select(Some(next));
+    }
+
+    pub fn live_scroll_page(&mut self, forward: bool) {
+        let step = self.live_page_rows.max(1) as i32;
+        self.live_scroll_by(if forward { step } else { -step });
+    }
+
+    pub fn live_scroll_home(&mut self) {
+        if self.live.is_empty() {
+            self.live_table.select(None);
+        } else {
+            self.live_table.select(Some(0));
+        }
+    }
+
+    pub fn live_scroll_end(&mut self) {
+        if self.live.is_empty() {
+            self.live_table.select(None);
+        } else {
+            self.live_table.select(Some(self.live.len() - 1));
         }
     }
 
@@ -107,6 +157,7 @@ impl App {
         let mut merged: Vec<LiveValue> = map.into_values().collect();
         merged.sort_by(|a, b| a.pid.cmp(&b.pid).then_with(|| a.name.cmp(&b.name)));
         self.live = merged;
+        self.clamp_live_selection();
         self.last_error = None;
     }
 

@@ -1,11 +1,12 @@
 //! obdtui — OBD-II diagnostic terminal UI (F1–F6 ramp).
 
 mod app;
+mod term_hud;
 mod ui;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -298,6 +299,28 @@ fn run_tui(app: &mut App) -> Result<()> {
                         KeyCode::Char('c') => app.toggle_capture(),
                         KeyCode::Char('x') => app.try_clear_dtcs(),
                         KeyCode::Char('b') => app.cycle_bus(),
+                        // Live table scroll (tab 1)
+                        KeyCode::Up if app.tab == Tab::Live => app.live_scroll_by(-1),
+                        KeyCode::Down if app.tab == Tab::Live => app.live_scroll_by(1),
+                        KeyCode::PageUp if app.tab == Tab::Live => app.live_scroll_page(false),
+                        KeyCode::PageDown if app.tab == Tab::Live => app.live_scroll_page(true),
+                        KeyCode::Home if app.tab == Tab::Live => app.live_scroll_home(),
+                        KeyCode::End if app.tab == Tab::Live => app.live_scroll_end(),
+                        KeyCode::Char('k') if app.tab == Tab::Live => app.live_scroll_by(-1),
+                        KeyCode::Char('j') if app.tab == Tab::Live => app.live_scroll_by(1),
+                        // Ctrl+arrows as alternate page scroll
+                        KeyCode::Up
+                            if app.tab == Tab::Live
+                                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            app.live_scroll_page(false)
+                        }
+                        KeyCode::Down
+                            if app.tab == Tab::Live
+                                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            app.live_scroll_page(true)
+                        }
                         _ => {}
                     }
                 }

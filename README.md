@@ -7,23 +7,23 @@ Linux OBD-II diagnostic TUI and reusable vehicle capture library.
 > Full Mode 01 capture · vector gauges · MFD shell · read-only default · 0.x may change.
 <!-- agents:status:end -->
 
-## VECTOR HUD (F-16 style — real 2D lines)
+## VECTOR HUD
 
-Terminal cells cannot draw proper vectors. Use the windowed HUD:
+### In the TUI (tab **2**)
+
+Braille-canvas **lines** in the terminal (Bresenham — LOGO / hi-res style):
+pitch ladder, gun cross, flight path, SPD/RPM tapes, radar rings + sweep.
 
 ```sh
-# live truck (quit obdtui first if it holds Bluetooth)
-cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1
-
-# offline
-cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live
+cargo run -p obd-tui -- --bt-mac 00:04:3E:96:B8:F1
+# press 2
 ```
 
-**Symbology (vector strokes):** pitch ladder, horizon, velocity vector, gun cross,
-SPD/RPM tapes, AoA bracket, heading tape, radar/sonar PPI with sweep, FOV brackets.
-Phosphor green + amber/red warnings. Click toggles scanlines.
+### Optional GPU window (higher res)
 
-`obdtui` tab **2 HUD** only points here — the real VECTOR display is `obd-mfd`.
+```sh
+cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1
+```
 
 ## What it does
 

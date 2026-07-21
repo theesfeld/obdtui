@@ -1,13 +1,14 @@
-//! Ratatui views. Real VECTOR HUD is the `obd-mfd` window — TUI HUD is a pointer.
+//! Ratatui views. HUD tab draws VECTOR lines with Braille canvas (LOGO-style).
 
 use crate::app::{App, Tab};
+use crate::term_hud;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap};
 use ratatui::Frame;
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -20,7 +21,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_header(f, chunks[0], app);
     match app.tab {
         Tab::Live => draw_live(f, chunks[1], app),
-        Tab::Hud => draw_hud_pointer(f, chunks[1], app),
+        Tab::Hud => term_hud::draw(f, chunks[1], app),
         Tab::Dtc => draw_dtc(f, chunks[1], app),
         Tab::Modules => draw_modules(f, chunks[1], app),
         Tab::Log => draw_log(f, chunks[1], app),
@@ -55,10 +56,11 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(tabs, area);
 }
 
-fn draw_live(f: &mut Frame, area: Rect, app: &App) {
+fn draw_live(f: &mut Frame, area: Rect, app: &mut App) {
     let vin = app.session.vin.as_deref().unwrap_or("(not read)");
+    let sel = app.live_table.selected().map(|i| i + 1).unwrap_or(0);
     let header = format!(
-        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}  ·  PIDs: {}",
+        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}  ·  PIDs: {}  ·  row {}/{}  (arrows)",
         app.session.active_bus(),
         if app.live_poll { "on" } else { "off" },
         if app.capturing {
@@ -70,7 +72,9 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "off"
         },
-        app.session.supported_pids.len()
+        app.session.supported_pids.len(),
+        sel,
+        app.live.len()
     );
 
     let chunks = Layout::default()
@@ -81,6 +85,9 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
     let info =
         Paragraph::new(header).block(Block::default().borders(Borders::ALL).title(" Session "));
     f.render_widget(info, chunks[0]);
+
+    // Header + borders take ~3 rows; keep page size for PgUp/PgDn.
+    app.live_page_rows = chunks[1].height.saturating_sub(3).max(1) as usize;
 
     let rows: Vec<Row> = app
         .live
@@ -111,52 +118,20 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
     )
+    .row_highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .highlight_symbol("> ")
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Live data (full Mode 01 when capturing) "),
+            .title(" Live data  ·  Up/Down  PgUp/PgDn  Home/End "),
     );
 
-    f.render_widget(table, chunks[1]);
-}
-
-/// TUI cannot do real vector lines — point at `obd-mfd`.
-fn draw_hud_pointer(f: &mut Frame, area: Rect, app: &App) {
-    let map = app.signal_map();
-    let rpm = map.get("engine_rpm").copied().unwrap_or(0.0);
-    let spd = map.get("vehicle_speed").copied().unwrap_or(0.0);
-    let thr = map.get("throttle").copied().unwrap_or(0.0);
-    let load = map.get("engine_load").copied().unwrap_or(0.0);
-    let cool = map.get("coolant_temp").copied().unwrap_or(0.0);
-
-    let text = format!(
-        "VECTOR HUD is a graphics window — not this terminal.\n\n\
-         Run:\n\
-           cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1\n\
-         or:\n\
-           cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live\n\n\
-         F-16 style VECTOR symbology:\n\
-           pitch ladder · velocity vector · gun cross\n\
-           SPD/RPM tapes · radar PPI · FOV brackets\n\n\
-         Live feed (this TUI session):\n\
-           RPM  {rpm:.0}    SPD  {spd:.0} km/h\n\
-           THR  {thr:.0}%   LOAD {load:.0}%\n\
-           COOL {cool:.0} C\n\n\
-         Only one process can own the Bluetooth adapter.\n\
-         Stop this TUI (q) before starting obd-mfd, or use USB."
-    );
-    f.render_widget(
-        Paragraph::new(text)
-            .style(Style::default().fg(Color::Green))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green))
-                    .title(" HUD → launch obd-mfd (VECTOR) "),
-            )
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    f.render_stateful_widget(table, chunks[1], &mut app.live_table);
 }
 
 fn draw_dtc(f: &mut Frame, area: Rect, app: &App) {
@@ -266,6 +241,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  q / Esc  Quit"),
         Line::from("  Tab      Next view"),
         Line::from("  1-6      Live / HUD / DTC / Modules / Log / Help"),
+        Line::from("  Up/Down  Scroll Live table (also j/k)"),
+        Line::from("  PgUp/Dn  Page Live table · Home/End ends"),
         Line::from("  p        Toggle live poll"),
         Line::from("  r        Read DTCs + freeze frame"),
         Line::from("  c        Start/stop FULL Mode 01 capture"),
@@ -273,9 +250,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  b        Cycle HS/MS bus (STN path)"),
         Line::from("  x        Clear DTCs (needs --allow-writes)"),
         Line::from(""),
-        Line::from("VECTOR HUD (real lines / F-16 symbology):"),
-        Line::from("  cargo run -p obd-mfd -- --bt-mac <MAC>"),
-        Line::from("  (quit this TUI first if sharing Bluetooth)"),
+        Line::from("Tab 2 HUD: VECTOR lines in-terminal (Braille canvas)."),
+        Line::from("Optional GPU window: cargo run -p obd-mfd -- --bt-mac <MAC>"),
         Line::from(""),
         Line::from(format!("Writes: {writes}")),
         Line::from(format!("Adapter: {}", app.status)),
