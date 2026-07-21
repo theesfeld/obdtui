@@ -7,6 +7,20 @@ Linux OBD-II diagnostic TUI and reusable vehicle capture library.
 > Full Mode 01 capture · vector gauges · MFD shell · read-only default · 0.x may change.
 <!-- agents:status:end -->
 
+## Vector MFD (real 2D graphics)
+
+Terminal gauges are limited. For fighter-style **vector** arcs and lines, use the windowed HUD:
+
+```sh
+# live truck
+cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1
+
+# offline replay
+cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live
+```
+
+`obd-mfd` opens a GPU window (egui) and draws real strokes — green phosphor HUD, amber/red warnings, reticle, scanlines (click to toggle). This is the path toward an in-cab MFD, not the text TUI.
+
 ## What it does
 
 - Connects to **USB serial** or **Bluetooth classic SPP** OBD adapters (same ELM/STN protocol)

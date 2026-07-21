@@ -1,0 +1,25 @@
+[package]
+name = "obd-mfd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Vector HUD / fighter-style MFD for live OBD-II data"
+readme = "../../README.md"
+keywords = ["obd", "mfd", "hud", "gauge", "vehicle"]
+categories = ["graphics", "command-line-utilities"]
+
+[[bin]]
+name = "obd-mfd"
+path = "src/main.rs"
+
+[dependencies]
+obd-io = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

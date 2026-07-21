@@ -4,6 +4,7 @@ members = [
     "crates/obd-io",
     "crates/obd-sim",
     "crates/obd-tui",
+    "crates/obd-mfd",
 ]
 default-members = ["crates/obd-tui"]
 
@@ -36,6 +37,8 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
+eframe = { version = "0.29", default-features = true }
+egui = "0.29"
 
 [profile.release]
 lto = true
