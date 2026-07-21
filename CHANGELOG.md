@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- **`obd-mfd`:** windowed vector HUD (egui) — real arcs/needles, phosphor green +
+  red/amber warnings (not terminal cell art)
 - **F1 Full Mode 01 capture:** enumerate all supported PID blocks; poll every
   supported PID while capture is on; priority + bulk scheduler
 - **F2 Vector gauges:** single instrument + multi-gauge row (arc + tape)
