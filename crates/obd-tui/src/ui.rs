@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap};
 use ratatui::Frame;
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -55,10 +55,11 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(tabs, area);
 }
 
-fn draw_live(f: &mut Frame, area: Rect, app: &App) {
+fn draw_live(f: &mut Frame, area: Rect, app: &mut App) {
     let vin = app.session.vin.as_deref().unwrap_or("(not read)");
+    let sel = app.live_table.selected().map(|i| i + 1).unwrap_or(0);
     let header = format!(
-        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}  ·  PIDs: {}",
+        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}  ·  PIDs: {}  ·  row {}/{}  (arrows)",
         app.session.active_bus(),
         if app.live_poll { "on" } else { "off" },
         if app.capturing {
@@ -70,7 +71,9 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "off"
         },
-        app.session.supported_pids.len()
+        app.session.supported_pids.len(),
+        sel,
+        app.live.len()
     );
 
     let chunks = Layout::default()
@@ -81,6 +84,9 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
     let info =
         Paragraph::new(header).block(Block::default().borders(Borders::ALL).title(" Session "));
     f.render_widget(info, chunks[0]);
+
+    // Header + borders take ~3 rows; keep page size for PgUp/PgDn.
+    app.live_page_rows = chunks[1].height.saturating_sub(3).max(1) as usize;
 
     let rows: Vec<Row> = app
         .live
@@ -111,13 +117,20 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
     )
+    .row_highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .highlight_symbol("> ")
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Live data (full Mode 01 when capturing) "),
+            .title(" Live data  ·  Up/Down  PgUp/PgDn  Home/End "),
     );
 
-    f.render_widget(table, chunks[1]);
+    f.render_stateful_widget(table, chunks[1], &mut app.live_table);
 }
 
 /// TUI cannot do real vector lines — point at `obd-mfd`.
@@ -266,6 +279,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  q / Esc  Quit"),
         Line::from("  Tab      Next view"),
         Line::from("  1-6      Live / HUD / DTC / Modules / Log / Help"),
+        Line::from("  Up/Down  Scroll Live table (also j/k)"),
+        Line::from("  PgUp/Dn  Page Live table · Home/End ends"),
         Line::from("  p        Toggle live poll"),
         Line::from("  r        Read DTCs + freeze frame"),
         Line::from("  c        Start/stop FULL Mode 01 capture"),
