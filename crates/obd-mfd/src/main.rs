@@ -94,9 +94,7 @@ fn main() -> Result<()> {
 // Re-export args fields for feed
 impl Args {
     pub fn connect_prefer(&self) -> Result<obd_io::LinkPrefer> {
-        self.prefer
-            .parse()
-            .map_err(|e: String| anyhow::anyhow!(e))
+        self.prefer.parse().map_err(|e: String| anyhow::anyhow!(e))
     }
 
     pub fn timeout(&self) -> Duration {

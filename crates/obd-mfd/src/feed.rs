@@ -50,24 +50,17 @@ impl ObdFeed {
         let join = thread::Builder::new()
             .name("obd-feed".into())
             .spawn(move || {
-                let session = match open_session(
-                    replay,
-                    port,
-                    baud,
-                    prefer,
-                    bt_mac,
-                    channel,
-                    timeout,
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        if let Ok(mut t) = tele_t.lock() {
-                            t.error = Some(e.to_string());
-                            t.status = "connect failed".into();
+                let session =
+                    match open_session(replay, port, baud, prefer, bt_mac, channel, timeout) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            if let Ok(mut t) = tele_t.lock() {
+                                t.error = Some(e.to_string());
+                                t.status = "connect failed".into();
+                            }
+                            return;
                         }
-                        return;
-                    }
-                };
+                    };
                 run_loop(session, stop_t, tele_t);
             })
             .context("spawn feed thread")?;
