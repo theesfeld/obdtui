@@ -24,7 +24,7 @@ pub struct LiveValue {
     pub raw_hex: String,
 }
 
-/// Built-in PID table for the live dashboard.
+/// Built-in PID table for the live dashboard (priority subset).
 pub fn standard_pid_defs() -> Vec<PidDef> {
     vec![
         pid(0x01, 0x0C, "engine_rpm", "rpm", "Engine RPM"),
@@ -39,6 +39,8 @@ pub fn standard_pid_defs() -> Vec<PidDef> {
         pid(0x01, 0x0F, "intake_temp", "C", "Intake air temperature"),
         pid(0x01, 0x11, "throttle", "%", "Throttle position"),
         pid(0x01, 0x04, "engine_load", "%", "Calculated engine load"),
+        pid(0x01, 0x0B, "map", "kPa", "Manifold absolute pressure"),
+        pid(0x01, 0x10, "maf", "g/s", "Mass air flow"),
         pid(0x01, 0x2F, "fuel_level", "%", "Fuel tank level"),
         pid(0x01, 0x46, "ambient_temp", "C", "Ambient air temperature"),
         pid(
@@ -48,7 +50,17 @@ pub fn standard_pid_defs() -> Vec<PidDef> {
             "V",
             "Control module voltage",
         ),
+        pid(0x01, 0x5C, "oil_temp", "C", "Engine oil temperature"),
+        pid(0x01, 0x5E, "fuel_rate", "L/h", "Engine fuel rate"),
+        pid(0x01, 0x0E, "timing_advance", "deg", "Timing advance"),
+        pid(0x01, 0x33, "baro", "kPa", "Barometric pressure"),
+        pid(0x01, 0x1F, "run_time", "s", "Run time since start"),
     ]
+}
+
+/// High-rate PIDs for capture priority channel.
+pub fn priority_pids() -> &'static [u8] {
+    &[0x0C, 0x0D, 0x04, 0x11, 0x0B, 0x10, 0x05]
 }
 
 fn pid(mode: u8, pid: u8, name: &str, unit: &str, description: &str) -> PidDef {
@@ -91,77 +103,7 @@ pub fn parse_hex_bytes(s: &str) -> Result<Vec<u8>> {
 
 /// Decode a Mode 01 response line into a live value when possible.
 pub fn decode_pid(response: &str, expect_pid: Option<u8>) -> Result<LiveValue> {
-    // Prefer last non-empty line; multi-line for some adapters.
-    let line = response
-        .lines()
-        .map(str::trim)
-        .rfind(|l| {
-            !l.is_empty()
-                && !l.starts_with("SEARCHING")
-                && !l.contains("NO DATA")
-                && !l.contains("UNABLE")
-                && !l.contains("ERROR")
-        })
-        .ok_or_else(|| Error::Decode(format!("empty or error response: {response:?}")))?;
-
-    let bytes = parse_hex_bytes(line)?;
-    if bytes.len() < 3 {
-        return Err(Error::Decode(format!("response too short: {line}")));
-    }
-
-    // Expected service response = mode + 0x40
-    let mode = bytes[0].wrapping_sub(0x40);
-    let pid = bytes[1];
-    if let Some(ep) = expect_pid {
-        if pid != ep {
-            return Err(Error::Decode(format!(
-                "PID mismatch: expected {ep:02X}, got {pid:02X}"
-            )));
-        }
-    }
-
-    let data = &bytes[2..];
-    let (name, value, unit) = match (mode, pid) {
-        (0x01, 0x0C) if data.len() >= 2 => {
-            let rpm = ((data[0] as f64) * 256.0 + data[1] as f64) / 4.0;
-            ("engine_rpm", rpm, "rpm")
-        }
-        (0x01, 0x0D) if !data.is_empty() => ("vehicle_speed", data[0] as f64, "km/h"),
-        (0x01, 0x05) if !data.is_empty() => ("coolant_temp", data[0] as f64 - 40.0, "C"),
-        (0x01, 0x0F) if !data.is_empty() => ("intake_temp", data[0] as f64 - 40.0, "C"),
-        (0x01, 0x11) if !data.is_empty() => ("throttle", data[0] as f64 * 100.0 / 255.0, "%"),
-        (0x01, 0x04) if !data.is_empty() => ("engine_load", data[0] as f64 * 100.0 / 255.0, "%"),
-        (0x01, 0x2F) if !data.is_empty() => ("fuel_level", data[0] as f64 * 100.0 / 255.0, "%"),
-        (0x01, 0x46) if !data.is_empty() => ("ambient_temp", data[0] as f64 - 40.0, "C"),
-        (0x01, 0x42) if data.len() >= 2 => {
-            let v = ((data[0] as f64) * 256.0 + data[1] as f64) / 1000.0;
-            ("control_module_voltage", v, "V")
-        }
-        _ => {
-            let raw = data
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect::<Vec<_>>()
-                .join("");
-            return Ok(LiveValue {
-                mode,
-                pid,
-                name: format!("pid_{mode:02X}_{pid:02X}"),
-                value: 0.0,
-                unit: "raw".into(),
-                raw_hex: raw,
-            });
-        }
-    };
-
-    Ok(LiveValue {
-        mode,
-        pid,
-        name: name.into(),
-        value,
-        unit: unit.into(),
-        raw_hex: line.chars().filter(|c| c.is_ascii_hexdigit()).collect(),
-    })
+    crate::j1979::decode::decode_mode_pid(response, 0x01, expect_pid)
 }
 
 /// Parse Mode 01 PID 00 (and optional 20/40/…) support bitmaps into PID numbers.

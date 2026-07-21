@@ -1,6 +1,7 @@
-//! Ratatui views.
+//! Ratatui views: table, vector gauges, MFD shell.
 
 use crate::app::{App, Tab};
+use crate::gauges::{dashboard_gauges, ArcGauge, TapeGauge};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -20,7 +21,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_header(f, chunks[0], app);
     match app.tab {
         Tab::Live => draw_live(f, chunks[1], app),
+        Tab::Gauges => draw_gauges(f, chunks[1], app),
+        Tab::Mfd => draw_mfd(f, chunks[1], app),
         Tab::Dtc => draw_dtc(f, chunks[1], app),
+        Tab::Modules => draw_modules(f, chunks[1], app),
         Tab::Log => draw_log(f, chunks[1], app),
         Tab::Help => draw_help(f, chunks[1], app),
     }
@@ -28,16 +32,27 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
-    let titles = ["1 Live", "2 DTC", "3 Log", "4 Help"]
-        .iter()
-        .cloned()
-        .map(Line::from)
-        .collect::<Vec<_>>();
+    let titles = [
+        "1 Live",
+        "2 Gauges",
+        "3 MFD",
+        "4 DTC",
+        "5 Modules",
+        "6 Log",
+        "7 Help",
+    ]
+    .iter()
+    .cloned()
+    .map(Line::from)
+    .collect::<Vec<_>>();
     let idx = match app.tab {
         Tab::Live => 0,
-        Tab::Dtc => 1,
-        Tab::Log => 2,
-        Tab::Help => 3,
+        Tab::Gauges => 1,
+        Tab::Mfd => 2,
+        Tab::Dtc => 3,
+        Tab::Modules => 4,
+        Tab::Log => 5,
+        Tab::Help => 6,
     };
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" obdtui "))
@@ -54,10 +69,19 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
 fn draw_live(f: &mut Frame, area: Rect, app: &App) {
     let vin = app.session.vin.as_deref().unwrap_or("(not read)");
     let header = format!(
-        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}",
+        "VIN: {vin}  ·  bus: {}  ·  poll: {}  ·  capture: {}  ·  PIDs: {}",
         app.session.active_bus(),
         if app.live_poll { "on" } else { "off" },
-        if app.capturing { "REC" } else { "off" },
+        if app.capturing {
+            if app.session.full_capture {
+                "FULL"
+            } else {
+                "REC"
+            }
+        } else {
+            "off"
+        },
+        app.session.supported_pids.len()
     );
 
     let chunks = Layout::default()
@@ -101,13 +125,176 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Live data (Mode 01) "),
+            .title(" Live data (full Mode 01 when capturing) "),
     );
 
     f.render_widget(table, chunks[1]);
 }
 
+fn draw_gauges(f: &mut Frame, area: Rect, app: &App) {
+    let map = app.signal_map();
+    let gauges = dashboard_gauges(&map);
+    if gauges.is_empty() {
+        f.render_widget(
+            Paragraph::new("No live signals yet. Wait for poll.")
+                .block(Block::default().borders(Borders::ALL).title(" Gauges ")),
+            area,
+        );
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(area);
+
+    // Single large gauge
+    let idx = app.gauge_index % gauges.len();
+    let single = gauges[idx].clone();
+    let single_block = Block::default().borders(Borders::ALL).title(format!(
+        " Vector single ({}/{})  [n=next] ",
+        idx + 1,
+        gauges.len()
+    ));
+    let inner = single_block.inner(chunks[0]);
+    f.render_widget(single_block, chunks[0]);
+    f.render_widget(single, inner);
+
+    // Row of mini gauges
+    let n = gauges.len().min(4);
+    let row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Percentage(100 / n as u16); n])
+        .split(chunks[1]);
+    for (i, g) in gauges.into_iter().take(n).enumerate() {
+        let b = Block::default().borders(Borders::ALL);
+        let inn = b.inner(row[i]);
+        f.render_widget(b, row[i]);
+        f.render_widget(g, inn);
+    }
+}
+
+fn draw_mfd(f: &mut Frame, area: Rect, app: &App) {
+    let map = app.signal_map();
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" MFD · vector HUD shell (F6) ");
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+        ])
+        .split(inner);
+
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(cols[0]);
+    let center = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(55),
+            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+        ])
+        .split(cols[1]);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(cols[2]);
+
+    let get = |k: &str| map.get(k).copied().unwrap_or(0.0);
+
+    f.render_widget(
+        ArcGauge {
+            label: "RPM".into(),
+            value: get("engine_rpm"),
+            min: 0.0,
+            max: 7000.0,
+            unit: "rpm".into(),
+            accent: Color::Cyan,
+        },
+        left[0],
+    );
+    f.render_widget(
+        ArcGauge {
+            label: "LOAD".into(),
+            value: get("engine_load"),
+            min: 0.0,
+            max: 100.0,
+            unit: "%".into(),
+            accent: Color::Yellow,
+        },
+        left[1],
+    );
+    f.render_widget(
+        ArcGauge {
+            label: "SPD".into(),
+            value: get("vehicle_speed"),
+            min: 0.0,
+            max: 200.0,
+            unit: "km/h".into(),
+            accent: Color::Green,
+        },
+        center[0],
+    );
+    f.render_widget(
+        TapeGauge {
+            label: "THR".into(),
+            value: get("throttle"),
+            min: 0.0,
+            max: 100.0,
+            unit: "%".into(),
+        },
+        center[1],
+    );
+    let strip = format!(
+        "VIN {}  BUS {}  CAP {}  SIG {}",
+        app.session.vin.as_deref().unwrap_or("—"),
+        app.session.active_bus(),
+        if app.capturing { "FULL" } else { "off" },
+        app.live.len()
+    );
+    f.render_widget(
+        Paragraph::new(strip).style(Style::default().fg(Color::DarkGray)),
+        center[2],
+    );
+    f.render_widget(
+        ArcGauge {
+            label: "COOL".into(),
+            value: get("coolant_temp"),
+            min: 40.0,
+            max: 120.0,
+            unit: "C".into(),
+            accent: Color::Red,
+        },
+        right[0],
+    );
+    f.render_widget(
+        ArcGauge {
+            label: "IAT".into(),
+            value: get("intake_temp"),
+            min: -20.0,
+            max: 80.0,
+            unit: "C".into(),
+            accent: Color::Blue,
+        },
+        right[1],
+    );
+}
+
 fn draw_dtc(f: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+
     let rows: Vec<Row> = if app.dtcs.is_empty() {
         vec![Row::new(vec![
             Cell::from("(none)"),
@@ -147,7 +334,43 @@ fn draw_dtc(f: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .title(" Diagnostic trouble codes "),
     );
-    f.render_widget(table, area);
+    f.render_widget(table, chunks[0]);
+
+    let ff = if app.freeze_lines.is_empty() {
+        "Freeze frame: press r to load.".to_string()
+    } else {
+        app.freeze_lines.join("\n")
+    };
+    f.render_widget(
+        Paragraph::new(ff)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Freeze frame (Mode 02) "),
+            )
+            .wrap(Wrap { trim: false }),
+        chunks[1],
+    );
+}
+
+fn draw_modules(f: &mut Frame, area: Rect, app: &App) {
+    let text = if app.module_lines.is_empty() {
+        "Press m to run Ford module read probes (read-only).\n\
+Bus b cycles HS/MS protocol select on STN/MX+."
+            .to_string()
+    } else {
+        app.module_lines.join("\n")
+    };
+    f.render_widget(
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Modules (F4 read scaffold) "),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 fn draw_log(f: &mut Frame, area: Rect, app: &App) {
@@ -172,23 +395,21 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("Keys"),
         Line::from("  q / Esc  Quit"),
         Line::from("  Tab      Next view"),
-        Line::from("  1-4      Live / DTC / Log / Help"),
+        Line::from("  1-7      Live / Gauges / MFD / DTC / Modules / Log / Help"),
         Line::from("  p        Toggle live poll"),
-        Line::from("  r        Read DTCs"),
-        Line::from("  c        Start or stop capture"),
-        Line::from("  b        Cycle bus tag (hs / ms / unknown)"),
+        Line::from("  r        Read DTCs + freeze frame"),
+        Line::from("  c        Start/stop FULL Mode 01 capture"),
+        Line::from("  n        Next single gauge"),
+        Line::from("  m        Module read probes"),
+        Line::from("  b        Cycle HS/MS bus (STN path)"),
         Line::from("  x        Clear DTCs (needs --allow-writes)"),
         Line::from(""),
         Line::from(format!("Writes: {writes}")),
         Line::from(format!("Adapter: {}", app.status)),
         Line::from(""),
-        Line::from("This is a 0.x tool. Interfaces may change."),
-        Line::from("This tool is not a full FORScan replacement."),
-        Line::from("Default mode is read-only."),
-        Line::from("Links: USB serial and Bluetooth SPP (RFCOMM)."),
-        Line::from("  USB: obdtui --port /dev/ttyUSB0"),
-        Line::from("  BT:  obdtui --bt-mac AA:BB:CC:DD:EE:FF"),
-        Line::from("  or:  obdtui --port /dev/rfcomm0 --prefer bluetooth"),
+        Line::from("F1 full capture · F2 vector gauges · F3 freeze frame"),
+        Line::from("F4 module probes · F5 gated writes · F6 MFD shell"),
+        Line::from("Default mode is read-only. No module programming."),
     ];
     let p = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" Help "))
@@ -202,15 +423,17 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         .as_deref()
         .map(|e| format!(" | {e}"))
         .unwrap_or_default();
+    let cap = if app.capturing { "FULL" } else { "off" };
     let text = Line::from(vec![
         Span::styled(
             " q quit ",
             Style::default().fg(Color::Black).bg(Color::Cyan),
         ),
         Span::raw(format!(
-            " {} · capture {}{}",
+            " {} · capture {} · live {}{}",
             app.status,
-            if app.capturing { "ON" } else { "off" },
+            cap,
+            app.live.len(),
             err
         )),
     ]);

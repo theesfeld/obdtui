@@ -1,6 +1,7 @@
-//! obdtui — OBD-II diagnostic terminal UI.
+//! obdtui — OBD-II diagnostic terminal UI (F1–F6 ramp).
 
 mod app;
+mod gauges;
 mod ui;
 
 use anyhow::{bail, Context, Result};
@@ -25,67 +26,56 @@ use crate::app::{App, Tab};
 #[derive(Parser, Debug)]
 #[command(
     name = "obdtui",
-    about = "OBD-II diagnostic TUI. USB serial and Bluetooth SPP. Default mode is read-only.",
+    about = "OBD-II TUI: full Mode 01 capture, vector gauges, MFD shell.",
     version,
-    long_about = "Connect to a USB OBD-II adapter or Bluetooth classic SPP adapter,\n\
-or replay a capture session.\n\
-Default mode is read-only. Clear DTCs only with --allow-writes.\n\
+    long_about = "USB serial or Bluetooth SPP. Default mode is read-only.\n\
+Full capture polls all supported Mode 01 PIDs.\n\
 0.x releases may change interfaces."
 )]
 struct Args {
-    /// Serial port path (USB: /dev/ttyUSB0, BT: /dev/rfcomm0). Auto-detect when omitted.
     #[arg(short, long, env = "OBDTUI_PORT")]
     port: Option<String>,
 
-    /// Serial baud rate. When omitted, try common rates for the link type.
     #[arg(long, env = "OBDTUI_BAUD")]
     baud: Option<u32>,
 
-    /// Prefer link type when auto-detecting: auto | usb | bluetooth
     #[arg(long, default_value = "auto", env = "OBDTUI_PREFER")]
     prefer: String,
 
-    /// Bluetooth MAC (classic SPP). Binds RFCOMM when needed (may need sudo).
     #[arg(long, env = "OBDTUI_BT_MAC")]
     bt_mac: Option<String>,
 
-    /// RFCOMM device index for --bt-mac (default 0 → /dev/rfcomm0)
     #[arg(long, default_value_t = 0)]
     rfcomm_index: u8,
 
-    /// RFCOMM channel (default 1 for most ELM sticks)
     #[arg(long, default_value_t = 1)]
     rfcomm_channel: u8,
 
-    /// Replay a capture directory instead of live hardware
     #[arg(long)]
     replay: Option<PathBuf>,
 
-    /// Directory for vehicle profile YAML files
     #[arg(long, default_value = "profiles")]
     profiles: PathBuf,
 
-    /// Profile id to load (default: generic_j1979)
     #[arg(long, default_value = "generic_j1979")]
     profile: String,
 
-    /// Directory root for new captures
     #[arg(long, default_value = "captures")]
     capture_dir: PathBuf,
 
-    /// Allow write operations such as clear DTCs
     #[arg(long, default_value_t = false)]
     allow_writes: bool,
 
-    /// List USB and Bluetooth endpoints and exit
+    /// Dashboard-only capture (disable full Mode 01 enumeration poll)
+    #[arg(long, default_value_t = false)]
+    no_full_capture: bool,
+
     #[arg(long)]
     list_ports: bool,
 
-    /// Write the sample capture fixture and exit
     #[arg(long)]
     write_sample: Option<PathBuf>,
 
-    /// Connect, print VIN / live sample / DTC count, exit (no TUI)
     #[arg(long)]
     probe: bool,
 }
@@ -103,9 +93,7 @@ fn main() -> Result<()> {
 
     if args.list_ports {
         match discover_adapters() {
-            Ok(endpoints) => {
-                println!("{}", format_endpoint_list(&endpoints));
-            }
+            Ok(endpoints) => println!("{}", format_endpoint_list(&endpoints)),
             Err(e) => bail!("port scan failed: {e}"),
         }
         return Ok(());
@@ -121,8 +109,8 @@ fn main() -> Result<()> {
     let profile = load_profile(&args.profiles, &args.profile)?;
     let mut session = build_session(&args, profile)?;
     session.allow_writes = args.allow_writes;
+    session.full_capture = !args.no_full_capture;
 
-    // Live connect already runs init inside `connect()`. Replay still needs init.
     if args.replay.is_some() {
         session.init().context("adapter init failed")?;
     }
@@ -131,15 +119,17 @@ fn main() -> Result<()> {
         return run_probe(&mut session);
     }
 
-    // Best-effort identity reads (replay and live).
     let mut boot_log = Vec::new();
     match session.read_vin() {
         Ok(v) => boot_log.push(format!("VIN {v}")),
         Err(e) => boot_log.push(format!("VIN not available: {e}")),
     }
     match session.probe_supported_pids() {
-        Ok(p) => boot_log.push(format!("Supported PIDs (block 0): {}", p.len())),
+        Ok(p) => boot_log.push(format!("Supported Mode 01 PIDs: {}", p.len())),
         Err(e) => boot_log.push(format!("PID support probe failed: {e}")),
+    }
+    if let Ok(cal) = session.read_calid() {
+        boot_log.push(format!("CALID {cal}"));
     }
 
     let mut app = App::new(session, args.capture_dir.clone());
@@ -149,11 +139,16 @@ fn main() -> Result<()> {
     let link = app.session.capabilities().link;
     let ms_can = app.session.capabilities().ms_can;
     app.push_log(format!("Link: {link}"));
-    if ms_can {
-        app.push_log("Adapter reports MS-CAN capability.".into());
+    app.push_log(if ms_can {
+        "MS-CAN capable adapter.".into()
     } else {
-        app.push_log("MS-CAN: not available on this adapter.".into());
-    }
+        "MS-CAN: not advertised.".into()
+    });
+    app.push_log(if app.session.full_capture {
+        "Full Mode 01 capture enabled (press c).".into()
+    } else {
+        "Dashboard-only capture.".into()
+    });
     if args.allow_writes {
         app.push_log("Writes enabled (clear DTC allowed).".into());
     } else {
@@ -171,16 +166,30 @@ fn run_probe(session: &mut VehicleSession) -> Result<()> {
         Err(e) => println!("VIN: (not available) {e}"),
     }
     match session.probe_supported_pids() {
-        Ok(p) => println!("supported PIDs (block 0): {}", p.len()),
+        Ok(p) => {
+            println!("supported Mode 01 PIDs: {}", p.len());
+            print!("  ");
+            for (i, pid) in p.iter().enumerate() {
+                if i > 0 && i % 16 == 0 {
+                    print!("\n  ");
+                }
+                print!("{pid:02X} ");
+            }
+            println!();
+        }
         Err(e) => println!("PID support probe: {e}"),
     }
-    match session.poll_dashboard() {
+    match session.poll_full() {
         Ok(vals) => {
+            println!("full poll: {} signals", vals.len());
             for v in vals {
-                println!("  {} = {:.2} {}", v.name, v.value, v.unit);
+                println!(
+                    "  {} = {:.2} {} (PID {:02X})",
+                    v.name, v.value, v.unit, v.pid
+                );
             }
         }
-        Err(e) => println!("live poll: {e}"),
+        Err(e) => println!("full poll: {e}"),
     }
     match session.read_dtcs() {
         Ok(dtcs) => {
@@ -190,6 +199,12 @@ fn run_probe(session: &mut VehicleSession) -> Result<()> {
             }
         }
         Err(e) => println!("DTC read: {e}"),
+    }
+    if let Ok(ff) = session.read_freeze_frame() {
+        println!("freeze frame: {}", ff.len());
+        for v in ff {
+            println!("  FF {} = {:.2}", v.name, v.value);
+        }
     }
     Ok(())
 }
@@ -252,7 +267,8 @@ fn run_tui(app: &mut App) -> Result<()> {
 
     let tick = Duration::from_millis(200);
     let mut last_poll = Instant::now() - Duration::from_secs(10);
-    let poll_every = Duration::from_millis(800);
+    // Full capture is slower — give more time between full sweeps
+    let poll_every = Duration::from_millis(if app.session.full_capture { 1200 } else { 800 });
 
     let result = (|| -> Result<()> {
         loop {
@@ -273,10 +289,15 @@ fn run_tui(app: &mut App) -> Result<()> {
                         KeyCode::Tab => app.next_tab(),
                         KeyCode::BackTab => app.prev_tab(),
                         KeyCode::Char('1') => app.tab = Tab::Live,
-                        KeyCode::Char('2') => app.tab = Tab::Dtc,
-                        KeyCode::Char('3') => app.tab = Tab::Log,
-                        KeyCode::Char('4') => app.tab = Tab::Help,
+                        KeyCode::Char('2') => app.tab = Tab::Gauges,
+                        KeyCode::Char('3') => app.tab = Tab::Mfd,
+                        KeyCode::Char('4') => app.tab = Tab::Dtc,
+                        KeyCode::Char('5') => app.tab = Tab::Modules,
+                        KeyCode::Char('6') => app.tab = Tab::Log,
+                        KeyCode::Char('7') | KeyCode::Char('h') => app.tab = Tab::Help,
                         KeyCode::Char('r') => app.refresh_dtcs(),
+                        KeyCode::Char('n') => app.next_gauge(),
+                        KeyCode::Char('m') => app.probe_modules(),
                         KeyCode::Char('p') => {
                             app.live_poll = !app.live_poll;
                             app.push_log(if app.live_poll {
@@ -287,7 +308,6 @@ fn run_tui(app: &mut App) -> Result<()> {
                         }
                         KeyCode::Char('c') => app.toggle_capture(),
                         KeyCode::Char('x') => app.try_clear_dtcs(),
-                        KeyCode::Char('h') => app.tab = Tab::Help,
                         KeyCode::Char('b') => app.cycle_bus(),
                         _ => {}
                     }
