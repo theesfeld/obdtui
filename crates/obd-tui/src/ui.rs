@@ -1,7 +1,6 @@
-//! Ratatui views: table, vector gauges, MFD shell.
+//! Ratatui views. Real VECTOR HUD is the `obd-mfd` window — TUI HUD is a pointer.
 
 use crate::app::{App, Tab};
-use crate::gauges::{dashboard_gauges, ArcGauge, TapeGauge};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -21,8 +20,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_header(f, chunks[0], app);
     match app.tab {
         Tab::Live => draw_live(f, chunks[1], app),
-        Tab::Gauges => draw_gauges(f, chunks[1], app),
-        Tab::Mfd => draw_mfd(f, chunks[1], app),
+        Tab::Hud => draw_hud_pointer(f, chunks[1], app),
         Tab::Dtc => draw_dtc(f, chunks[1], app),
         Tab::Modules => draw_modules(f, chunks[1], app),
         Tab::Log => draw_log(f, chunks[1], app),
@@ -32,27 +30,18 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
-    let titles = [
-        "1 Live",
-        "2 Gauges",
-        "3 MFD",
-        "4 DTC",
-        "5 Modules",
-        "6 Log",
-        "7 Help",
-    ]
-    .iter()
-    .cloned()
-    .map(Line::from)
-    .collect::<Vec<_>>();
+    let titles = ["1 Live", "2 HUD", "3 DTC", "4 Modules", "5 Log", "6 Help"]
+        .iter()
+        .cloned()
+        .map(Line::from)
+        .collect::<Vec<_>>();
     let idx = match app.tab {
         Tab::Live => 0,
-        Tab::Gauges => 1,
-        Tab::Mfd => 2,
-        Tab::Dtc => 3,
-        Tab::Modules => 4,
-        Tab::Log => 5,
-        Tab::Help => 6,
+        Tab::Hud => 1,
+        Tab::Dtc => 2,
+        Tab::Modules => 3,
+        Tab::Log => 4,
+        Tab::Help => 5,
     };
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" obdtui "))
@@ -131,172 +120,42 @@ fn draw_live(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, chunks[1]);
 }
 
-fn draw_gauges(f: &mut Frame, area: Rect, app: &App) {
+/// TUI cannot do real vector lines — point at `obd-mfd`.
+fn draw_hud_pointer(f: &mut Frame, area: Rect, app: &App) {
     let map = app.signal_map();
-    let gauges = dashboard_gauges(&map);
-    if gauges.is_empty() {
-        f.render_widget(
-            Paragraph::new("No live signals yet. Wait for poll.")
-                .block(Block::default().borders(Borders::ALL).title(" Gauges ")),
-            area,
-        );
-        return;
-    }
+    let rpm = map.get("engine_rpm").copied().unwrap_or(0.0);
+    let spd = map.get("vehicle_speed").copied().unwrap_or(0.0);
+    let thr = map.get("throttle").copied().unwrap_or(0.0);
+    let load = map.get("engine_load").copied().unwrap_or(0.0);
+    let cool = map.get("coolant_temp").copied().unwrap_or(0.0);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(area);
-
-    // Single large gauge
-    let idx = app.gauge_index % gauges.len();
-    let single = gauges[idx].clone();
-    let single_block = Block::default().borders(Borders::ALL).title(format!(
-        " Vector single ({}/{})  [n=next] ",
-        idx + 1,
-        gauges.len()
-    ));
-    let inner = single_block.inner(chunks[0]);
-    f.render_widget(single_block, chunks[0]);
-    f.render_widget(single, inner);
-
-    // Row of mini gauges
-    let n = gauges.len().clamp(1, 4);
-    if chunks[1].width < 8 || chunks[1].height < 4 {
-        return;
-    }
-    let row = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Ratio(1, n as u32); n])
-        .split(chunks[1]);
-    for (i, g) in gauges.into_iter().take(n).enumerate() {
-        if i >= row.len() {
-            break;
-        }
-        let b = Block::default().borders(Borders::ALL);
-        let inn = b.inner(row[i]);
-        f.render_widget(b, row[i]);
-        if inn.width >= 6 && inn.height >= 3 {
-            f.render_widget(g, inn);
-        }
-    }
-}
-
-fn draw_mfd(f: &mut Frame, area: Rect, app: &App) {
-    let map = app.signal_map();
-    let outer = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .title(" MFD · vector HUD (live priority PIDs) ");
-    let inner = outer.inner(area);
-    f.render_widget(outer, area);
-
-    // Guard tiny terminals — no nested splits that can panic/zero-size.
-    if inner.width < 24 || inner.height < 10 {
-        f.render_widget(
-            Paragraph::new("MFD needs a larger terminal (min ~24x10).")
-                .style(Style::default().fg(Color::Yellow)),
-            inner,
-        );
-        return;
-    }
-
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-        ])
-        .split(inner);
-
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-        .split(cols[0]);
-    let center = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(5),
-            Constraint::Length(3),
-            Constraint::Length(2),
-        ])
-        .split(cols[1]);
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-        .split(cols[2]);
-
-    let get = |k: &str| map.get(k).copied().unwrap_or(0.0);
-
-    f.render_widget(
-        ArcGauge::new("RPM", get("engine_rpm"), 0.0, 7000.0, "rpm"),
-        left[0],
+    let text = format!(
+        "VECTOR HUD is a graphics window — not this terminal.\n\n\
+         Run:\n\
+           cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1\n\
+         or:\n\
+           cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live\n\n\
+         F-16 style VECTOR symbology:\n\
+           pitch ladder · velocity vector · gun cross\n\
+           SPD/RPM tapes · radar PPI · FOV brackets\n\n\
+         Live feed (this TUI session):\n\
+           RPM  {rpm:.0}    SPD  {spd:.0} km/h\n\
+           THR  {thr:.0}%   LOAD {load:.0}%\n\
+           COOL {cool:.0} C\n\n\
+         Only one process can own the Bluetooth adapter.\n\
+         Stop this TUI (q) before starting obd-mfd, or use USB."
     );
     f.render_widget(
-        ArcGauge {
-            label: "LOAD".into(),
-            value: get("engine_load"),
-            min: 0.0,
-            max: 100.0,
-            unit: "%".into(),
-            accent: Color::Yellow,
-        },
-        left[1],
-    );
-    f.render_widget(
-        ArcGauge {
-            label: "SPD".into(),
-            value: get("vehicle_speed"),
-            min: 0.0,
-            max: 200.0,
-            unit: "km/h".into(),
-            accent: Color::Green,
-        },
-        center[0],
-    );
-    f.render_widget(
-        TapeGauge {
-            label: "THR".into(),
-            value: get("throttle"),
-            min: 0.0,
-            max: 100.0,
-            unit: "%".into(),
-        },
-        center[1],
-    );
-    let strip = format!(
-        "VIN {}  BUS {}  CAP {}  SIG {}  poll LIVE",
-        app.session.vin.as_deref().unwrap_or("-"),
-        app.session.active_bus(),
-        if app.capturing { "FULL" } else { "off" },
-        app.live.len()
-    );
-    f.render_widget(
-        Paragraph::new(strip).style(Style::default().fg(Color::DarkGray)),
-        center[2],
-    );
-    f.render_widget(
-        ArcGauge {
-            label: "COOL".into(),
-            value: get("coolant_temp"),
-            min: 40.0,
-            max: 120.0,
-            unit: "C".into(),
-            accent: Color::Red,
-        },
-        right[0],
-    );
-    f.render_widget(
-        ArcGauge {
-            label: "IAT".into(),
-            value: get("intake_temp"),
-            min: -20.0,
-            max: 80.0,
-            unit: "C".into(),
-            accent: Color::Blue,
-        },
-        right[1],
+        Paragraph::new(text)
+            .style(Style::default().fg(Color::Green))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green))
+                    .title(" HUD → launch obd-mfd (VECTOR) "),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
     );
 }
 
@@ -406,21 +265,20 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("Keys"),
         Line::from("  q / Esc  Quit"),
         Line::from("  Tab      Next view"),
-        Line::from("  1-7      Live / Gauges / MFD / DTC / Modules / Log / Help"),
+        Line::from("  1-6      Live / HUD / DTC / Modules / Log / Help"),
         Line::from("  p        Toggle live poll"),
         Line::from("  r        Read DTCs + freeze frame"),
         Line::from("  c        Start/stop FULL Mode 01 capture"),
-        Line::from("  n        Next single gauge"),
         Line::from("  m        Module read probes"),
         Line::from("  b        Cycle HS/MS bus (STN path)"),
         Line::from("  x        Clear DTCs (needs --allow-writes)"),
         Line::from(""),
+        Line::from("VECTOR HUD (real lines / F-16 symbology):"),
+        Line::from("  cargo run -p obd-mfd -- --bt-mac <MAC>"),
+        Line::from("  (quit this TUI first if sharing Bluetooth)"),
+        Line::from(""),
         Line::from(format!("Writes: {writes}")),
         Line::from(format!("Adapter: {}", app.status)),
-        Line::from(""),
-        Line::from("F1 full capture · F2 vector gauges · F3 freeze frame"),
-        Line::from("F4 module probes · F5 gated writes · F6 MFD shell"),
-        Line::from("Default mode is read-only. No module programming."),
     ];
     let p = Paragraph::new(lines)
         .block(Block::default().borders(Borders::ALL).title(" Help "))

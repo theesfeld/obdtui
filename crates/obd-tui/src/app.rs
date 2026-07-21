@@ -10,8 +10,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Live,
-    Gauges,
-    Mfd,
+    /// Text stand-in only — real VECTOR HUD is `obd-mfd`.
+    Hud,
     Dtc,
     Modules,
     Log,
@@ -29,10 +29,9 @@ pub struct App {
     pub capture_root: PathBuf,
     pub status: String,
     pub last_error: Option<String>,
-    pub gauge_index: usize,
     pub module_lines: Vec<String>,
     pub freeze_lines: Vec<String>,
-    /// Alternate bulk capture steps when gauges/MFD need max priority rate.
+    /// Alternate bulk capture steps when HUD focus needs max priority rate.
     pub bulk_flip: bool,
 }
 
@@ -54,7 +53,6 @@ impl App {
             capture_root,
             status,
             last_error: None,
-            gauge_index: 0,
             module_lines: Vec::new(),
             freeze_lines: Vec::new(),
             bulk_flip: false,
@@ -76,9 +74,8 @@ impl App {
 
     pub fn next_tab(&mut self) {
         self.tab = match self.tab {
-            Tab::Live => Tab::Gauges,
-            Tab::Gauges => Tab::Mfd,
-            Tab::Mfd => Tab::Dtc,
+            Tab::Live => Tab::Hud,
+            Tab::Hud => Tab::Dtc,
             Tab::Dtc => Tab::Modules,
             Tab::Modules => Tab::Log,
             Tab::Log => Tab::Help,
@@ -89,9 +86,8 @@ impl App {
     pub fn prev_tab(&mut self) {
         self.tab = match self.tab {
             Tab::Live => Tab::Help,
-            Tab::Gauges => Tab::Live,
-            Tab::Mfd => Tab::Gauges,
-            Tab::Dtc => Tab::Mfd,
+            Tab::Hud => Tab::Live,
+            Tab::Dtc => Tab::Hud,
             Tab::Modules => Tab::Dtc,
             Tab::Log => Tab::Modules,
             Tab::Help => Tab::Log,
@@ -260,9 +256,5 @@ impl App {
             }
             Err(e) => self.push_log(format!("Module probe failed: {e}")),
         }
-    }
-
-    pub fn next_gauge(&mut self) {
-        self.gauge_index = self.gauge_index.wrapping_add(1);
     }
 }

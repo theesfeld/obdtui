@@ -14,10 +14,10 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(
     name = "obd-mfd",
-    about = "Vector HUD MFD — fighter-style gauges for live OBD-II",
+    about = "VECTOR HUD — F-16 style cockpit symbology for live OBD-II",
     version,
-    long_about = "Opens a graphics window and draws real vector arcs/lines.\n\
-Not a terminal TUI. Uses egui for 2D drawing.\n\
+    long_about = "Opens a graphics window. Real VECTOR lines: pitch ladder,\n\
+velocity vector, radar PPI, speed/RPM tapes. Not a terminal TUI.\n\
 Connect: USB serial or Bluetooth SPP (same as obdtui)."
 )]
 struct Args {
@@ -68,13 +68,13 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([args.width as f32, args.height as f32])
-            .with_title("obd-mfd · vector HUD")
+            .with_title("OBD VECTOR HUD")
             .with_active(true),
         ..Default::default()
     };
 
     eframe::run_native(
-        "obd-mfd",
+        "OBD VECTOR HUD",
         options,
         Box::new(move |cc| {
             // Dark phosphor panel look
