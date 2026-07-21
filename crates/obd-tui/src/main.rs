@@ -84,6 +84,10 @@ struct Args {
     /// Write the sample capture fixture and exit
     #[arg(long)]
     write_sample: Option<PathBuf>,
+
+    /// Connect, print VIN / live sample / DTC count, exit (no TUI)
+    #[arg(long)]
+    probe: bool,
 }
 
 fn main() -> Result<()> {
@@ -123,6 +127,10 @@ fn main() -> Result<()> {
         session.init().context("adapter init failed")?;
     }
 
+    if args.probe {
+        return run_probe(&mut session);
+    }
+
     // Best-effort identity reads (replay and live).
     let mut boot_log = Vec::new();
     match session.read_vin() {
@@ -153,6 +161,37 @@ fn main() -> Result<()> {
     }
 
     run_tui(&mut app)
+}
+
+fn run_probe(session: &mut VehicleSession) -> Result<()> {
+    println!("transport: {}", session.transport_name());
+    println!("caps: {}", session.capabilities().summary());
+    match session.read_vin() {
+        Ok(v) => println!("VIN: {v}"),
+        Err(e) => println!("VIN: (not available) {e}"),
+    }
+    match session.probe_supported_pids() {
+        Ok(p) => println!("supported PIDs (block 0): {}", p.len()),
+        Err(e) => println!("PID support probe: {e}"),
+    }
+    match session.poll_dashboard() {
+        Ok(vals) => {
+            for v in vals {
+                println!("  {} = {:.2} {}", v.name, v.value, v.unit);
+            }
+        }
+        Err(e) => println!("live poll: {e}"),
+    }
+    match session.read_dtcs() {
+        Ok(dtcs) => {
+            println!("DTCs: {}", dtcs.len());
+            for d in dtcs {
+                println!("  {} ({:?})", d.code, d.status);
+            }
+        }
+        Err(e) => println!("DTC read: {e}"),
+    }
+    Ok(())
 }
 
 fn load_profile(dir: &PathBuf, id: &str) -> Result<obd_io::VehicleProfile> {
@@ -189,16 +228,19 @@ fn build_session(args: &Args, profile: obd_io::VehicleProfile) -> Result<Vehicle
     };
 
     let connected = connect(opts).context("connect to OBD adapter (USB or Bluetooth)")?;
-    eprintln!(
-        "Connected: {} ({}) @ {} baud",
-        connected.endpoint.path, connected.endpoint.kind, connected.baud
-    );
+    if connected.baud == 0 {
+        eprintln!(
+            "Connected: {} ({})",
+            connected.endpoint.path, connected.endpoint.kind
+        );
+    } else {
+        eprintln!(
+            "Connected: {} ({}) @ {} baud",
+            connected.endpoint.path, connected.endpoint.kind, connected.baud
+        );
+    }
 
-    Ok(VehicleSession::new(
-        Box::new(connected.transport),
-        profile,
-        software,
-    ))
+    Ok(VehicleSession::new(connected.transport, profile, software))
 }
 
 fn run_tui(app: &mut App) -> Result<()> {

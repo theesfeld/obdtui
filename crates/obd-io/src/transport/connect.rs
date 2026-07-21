@@ -1,5 +1,6 @@
 //! Discover and open USB or Bluetooth SPP ELM adapters.
 
+use super::bt_spp::BtSppTransport;
 use super::elm::{ElmConfig, ElmTransport};
 use super::link::{normalize_bt_mac, AdapterEndpoint};
 use super::Transport;
@@ -51,8 +52,9 @@ impl Default for ConnectOptions {
 
 /// Result of a successful connect.
 pub struct ConnectedAdapter {
-    pub transport: ElmTransport,
+    pub transport: Box<dyn Transport>,
     pub endpoint: AdapterEndpoint,
+    /// Serial baud used for USB/`/dev/rfcomm` paths. `0` for native RFCOMM sockets.
     pub baud: u32,
 }
 
@@ -109,42 +111,76 @@ pub fn discover_serial_ports() -> Result<Vec<String>> {
 /// Connect to an adapter: wired USB and/or Bluetooth SPP.
 ///
 /// Order:
-/// 1. If `bt_mac` set, ensure RFCOMM bind
-/// 2. Resolve path list (explicit or discovery + prefer)
-/// 3. For each path, try bauds until ELM `ATI` succeeds
+/// 1. Bluetooth MAC / `bt://` → native RFCOMM socket (no root)
+/// 2. Prefer paired Bluetooth hints when `--prefer bluetooth` or auto and no USB
+/// 3. USB serial and existing `/dev/rfcomm*` with multi-baud try
 pub fn connect(opts: ConnectOptions) -> Result<ConnectedAdapter> {
-    let mut opts = opts;
-
-    // Resolve Bluetooth MAC bind → /dev/rfcommN
-    if let Some(mac) = opts.bt_mac.clone() {
-        let path = ensure_rfcomm(&mac, opts.rfcomm_index, opts.rfcomm_channel)?;
-        if opts.path.is_none() {
-            opts.path = Some(path);
-        }
-    } else if let Some(path) = opts.path.clone() {
-        if let Some(mac) = path.strip_prefix("bt://").and_then(normalize_bt_mac) {
-            let bound = ensure_rfcomm(&mac, opts.rfcomm_index, opts.rfcomm_channel)?;
-            opts.path = Some(bound);
-            opts.bt_mac = Some(mac);
-        }
-    }
-
-    let candidates = resolve_candidates(&opts)?;
-    if candidates.is_empty() {
-        return Err(Error::NoAdapter);
-    }
-
     let mut errors: Vec<String> = Vec::new();
 
+    // 1) Explicit Bluetooth MAC → native SPP socket (preferred; no sudo).
+    if let Some(mac) = opts.bt_mac.clone() {
+        match try_bt_spp(&mac, &opts) {
+            Ok(conn) => return Ok(conn),
+            Err(e) => {
+                let msg = format!("bt-spp {mac}: {e}");
+                warn!("{msg}");
+                errors.push(msg);
+            }
+        }
+    }
+
+    // 2) Path is bt://MAC
+    if let Some(path) = opts.path.clone() {
+        if let Some(mac) = path.strip_prefix("bt://").and_then(normalize_bt_mac) {
+            match try_bt_spp(&mac, &opts) {
+                Ok(conn) => return Ok(conn),
+                Err(e) => errors.push(format!("bt-spp {mac}: {e}")),
+            }
+        }
+    }
+
+    // 3) Prefer: try paired OBD Bluetooth hints via native SPP when bluetooth preferred
+    //    or when auto and no explicit path.
+    if opts.path.is_none()
+        && opts.bt_mac.is_none()
+        && matches!(opts.prefer, LinkPrefer::Auto | LinkPrefer::Bluetooth)
+    {
+        for hint in bluetooth_paired_hints() {
+            match try_bt_spp(&hint.mac, &opts) {
+                Ok(conn) => return Ok(conn),
+                Err(e) => {
+                    debug!(mac = %hint.mac, error = %e, "paired BT SPP try failed");
+                    errors.push(format!("bt-spp {}: {e}", hint.mac));
+                }
+            }
+        }
+    }
+
+    // 4) Serial paths (USB + /dev/rfcomm)
+    let candidates = resolve_candidates(&opts)?;
     for ep in candidates {
+        if ep.path.starts_with("bt://") {
+            if let Some(mac) = ep
+                .bt_mac
+                .as_ref()
+                .cloned()
+                .or_else(|| ep.path.strip_prefix("bt://").and_then(normalize_bt_mac))
+            {
+                match try_bt_spp(&mac, &opts) {
+                    Ok(conn) => return Ok(conn),
+                    Err(e) => errors.push(format!("bt-spp {mac}: {e}")),
+                }
+            }
+            continue;
+        }
         let bauds = baud_list(&opts, ep.kind);
         for &baud in &bauds {
-            debug!(path = %ep.path, baud, kind = %ep.kind, "try open adapter");
-            match try_open_and_init(&ep, baud, &opts) {
+            debug!(path = %ep.path, baud, kind = %ep.kind, "try open serial adapter");
+            match try_open_serial(&ep, baud, &opts) {
                 Ok(transport) => {
                     info!(path = %ep.path, baud, kind = %ep.kind, "adapter ready");
                     return Ok(ConnectedAdapter {
-                        transport,
+                        transport: Box::new(transport),
                         endpoint: ep,
                         baud,
                     });
@@ -158,25 +194,40 @@ pub fn connect(opts: ConnectOptions) -> Result<ConnectedAdapter> {
         }
     }
 
+    if errors.is_empty() {
+        return Err(Error::NoAdapter);
+    }
     Err(Error::AdapterInit(format!(
         "no working adapter (tried USB and/or Bluetooth).\n{}",
         errors.join("\n")
     )))
 }
 
-fn try_open_and_init(
-    ep: &AdapterEndpoint,
-    baud: u32,
-    opts: &ConnectOptions,
-) -> Result<ElmTransport> {
-    if ep.path.starts_with("bt://") {
-        return Err(Error::AdapterInit(
-            "Bluetooth device is paired but not bound; set --bt-mac or bind rfcomm".into(),
-        ));
+fn try_bt_spp(mac: &str, opts: &ConnectOptions) -> Result<ConnectedAdapter> {
+    let mac = normalize_bt_mac(mac)
+        .ok_or_else(|| Error::AdapterInit(format!("invalid Bluetooth MAC: {mac}")))?;
+    let timeout = opts.timeout.max(Duration::from_millis(4_000));
+    let mut transport = BtSppTransport::new(&mac, opts.rfcomm_channel, timeout, opts.default_bus)?;
+    transport.open()?;
+    if !opts.skip_init {
+        transport.init()?;
     }
+    info!(%mac, channel = opts.rfcomm_channel, "Bluetooth SPP adapter ready");
+    let endpoint = AdapterEndpoint {
+        path: format!("bt://{mac}"),
+        kind: LinkKind::BluetoothSpp,
+        description: "Bluetooth SPP (native RFCOMM socket)".into(),
+        bt_mac: Some(mac),
+    };
+    Ok(ConnectedAdapter {
+        transport: Box::new(transport),
+        endpoint,
+        baud: 0,
+    })
+}
 
+fn try_open_serial(ep: &AdapterEndpoint, baud: u32, opts: &ConnectOptions) -> Result<ElmTransport> {
     let timeout = if ep.kind == LinkKind::BluetoothSpp {
-        // BT SPP is slower; give init more headroom.
         opts.timeout.max(Duration::from_millis(4_000))
     } else {
         opts.timeout
@@ -199,16 +250,23 @@ fn try_open_and_init(
 
 fn resolve_candidates(opts: &ConnectOptions) -> Result<Vec<AdapterEndpoint>> {
     if let Some(path) = &opts.path {
+        if path.starts_with("bt://") {
+            return Ok(vec![AdapterEndpoint {
+                path: path.clone(),
+                kind: LinkKind::BluetoothSpp,
+                description: "Bluetooth SPP".into(),
+                bt_mac: path.strip_prefix("bt://").and_then(normalize_bt_mac),
+            }]);
+        }
         return Ok(vec![AdapterEndpoint::from_path(path)]);
     }
 
     let mut all = discover_adapters()?;
-    // Drop unbound bt:// hints for auto-connect (need --bt-mac).
-    all.retain(|e| !e.path.starts_with("bt://"));
-
     match opts.prefer {
         LinkPrefer::Usb => all.retain(|e| e.kind == LinkKind::UsbSerial),
-        LinkPrefer::Bluetooth => all.retain(|e| e.kind == LinkKind::BluetoothSpp),
+        LinkPrefer::Bluetooth => {
+            all.retain(|e| e.kind == LinkKind::BluetoothSpp || e.path.starts_with("bt://"))
+        }
         LinkPrefer::Auto => {}
     }
 

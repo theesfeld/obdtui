@@ -605,6 +605,7 @@ name = "obd-io"
 version = "0.1.0-dev.1"
 dependencies = [
  "chrono",
+ "libc",
  "serde",
  "serde_json",
  "serde_yaml",

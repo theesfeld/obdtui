@@ -1,0 +1,15 @@
+format_version = 1
+software = "obdtui-live-capture"
+started_at = "2026-07-21T22:32:12.863129Z"
+vin = "1FTEW1EP9KFC73499"
+adapter_path = "bt://00:04:3E:96:B8:F1"
+profile_id = "ford_stub"
+notes = "Live Ford truck OBDLink MX+ Bluetooth SPP"
+
+[capabilities]
+elm_compatible = true
+stn = true
+ms_can = true
+link = "bluetooth_spp"
+identity = "ELM327 v1.4b"
+protocol = "AUTO"
