@@ -1,6 +1,7 @@
 //! obdtui — OBD-II diagnostic terminal UI (F1–F6 ramp).
 
 mod app;
+mod term_hud;
 mod ui;
 
 use anyhow::{bail, Context, Result};

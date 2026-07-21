@@ -1,6 +1,7 @@
-//! Ratatui views. Real VECTOR HUD is the `obd-mfd` window — TUI HUD is a pointer.
+//! Ratatui views. HUD tab draws VECTOR lines with Braille canvas (LOGO-style).
 
 use crate::app::{App, Tab};
+use crate::term_hud;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -20,7 +21,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_header(f, chunks[0], app);
     match app.tab {
         Tab::Live => draw_live(f, chunks[1], app),
-        Tab::Hud => draw_hud_pointer(f, chunks[1], app),
+        Tab::Hud => term_hud::draw(f, chunks[1], app),
         Tab::Dtc => draw_dtc(f, chunks[1], app),
         Tab::Modules => draw_modules(f, chunks[1], app),
         Tab::Log => draw_log(f, chunks[1], app),
@@ -131,45 +132,6 @@ fn draw_live(f: &mut Frame, area: Rect, app: &mut App) {
     );
 
     f.render_stateful_widget(table, chunks[1], &mut app.live_table);
-}
-
-/// TUI cannot do real vector lines — point at `obd-mfd`.
-fn draw_hud_pointer(f: &mut Frame, area: Rect, app: &App) {
-    let map = app.signal_map();
-    let rpm = map.get("engine_rpm").copied().unwrap_or(0.0);
-    let spd = map.get("vehicle_speed").copied().unwrap_or(0.0);
-    let thr = map.get("throttle").copied().unwrap_or(0.0);
-    let load = map.get("engine_load").copied().unwrap_or(0.0);
-    let cool = map.get("coolant_temp").copied().unwrap_or(0.0);
-
-    let text = format!(
-        "VECTOR HUD is a graphics window — not this terminal.\n\n\
-         Run:\n\
-           cargo run -p obd-mfd -- --bt-mac 00:04:3E:96:B8:F1\n\
-         or:\n\
-           cargo run -p obd-mfd -- --replay fixtures/truck-mxplus-live\n\n\
-         F-16 style VECTOR symbology:\n\
-           pitch ladder · velocity vector · gun cross\n\
-           SPD/RPM tapes · radar PPI · FOV brackets\n\n\
-         Live feed (this TUI session):\n\
-           RPM  {rpm:.0}    SPD  {spd:.0} km/h\n\
-           THR  {thr:.0}%   LOAD {load:.0}%\n\
-           COOL {cool:.0} C\n\n\
-         Only one process can own the Bluetooth adapter.\n\
-         Stop this TUI (q) before starting obd-mfd, or use USB."
-    );
-    f.render_widget(
-        Paragraph::new(text)
-            .style(Style::default().fg(Color::Green))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green))
-                    .title(" HUD → launch obd-mfd (VECTOR) "),
-            )
-            .wrap(Wrap { trim: false }),
-        area,
-    );
 }
 
 fn draw_dtc(f: &mut Frame, area: Rect, app: &App) {
@@ -288,9 +250,8 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  b        Cycle HS/MS bus (STN path)"),
         Line::from("  x        Clear DTCs (needs --allow-writes)"),
         Line::from(""),
-        Line::from("VECTOR HUD (real lines / F-16 symbology):"),
-        Line::from("  cargo run -p obd-mfd -- --bt-mac <MAC>"),
-        Line::from("  (quit this TUI first if sharing Bluetooth)"),
+        Line::from("Tab 2 HUD: VECTOR lines in-terminal (Braille canvas)."),
+        Line::from("Optional GPU window: cargo run -p obd-mfd -- --bt-mac <MAC>"),
         Line::from(""),
         Line::from(format!("Writes: {writes}")),
         Line::from(format!("Adapter: {}", app.status)),

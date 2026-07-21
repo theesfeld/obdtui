@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Live,
-    /// Text stand-in only — real VECTOR HUD is `obd-mfd`.
+    /// VECTOR HUD drawn with terminal Braille canvas lines.
     Hud,
     Dtc,
     Modules,
