@@ -1,0 +1,27 @@
+[package]
+name = "obd-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "OBD-II diagnostic TUI (read-only by default)"
+readme = "../../README.md"
+keywords = ["obd", "tui", "vehicle", "diagnostic"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "obdtui"
+path = "src/main.rs"
+
+[dependencies]
+obd-io = { workspace = true }
+obd-sim = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

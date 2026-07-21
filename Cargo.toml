@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/obd-io",
+    "crates/obd-sim",
+    "crates/obd-tui",
+]
+default-members = ["crates/obd-tui"]
+
+[workspace.package]
+version = "0.1.0-dev.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/theesfeld/obdtui"
+homepage = "https://theesfeld.github.io/obdtui/"
+authors = ["theesfeld"]
+rust-version = "1.74"
+readme = "README.md"
+
+[workspace.dependencies]
+obd-io = { path = "crates/obd-io", version = "0.1.0-dev.1" }
+obd-sim = { path = "crates/obd-sim", version = "0.1.0-dev.1" }
+
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+# default-features includes libudev; disable for portable Nix/minimal hosts
+serialport = { version = "4", default-features = false }
+thiserror = "2"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

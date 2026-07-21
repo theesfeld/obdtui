@@ -1,0 +1,25 @@
+[package]
+name = "obd-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "OBD-II transport, J1979 decode, and reusable capture format"
+readme = "README.md"
+keywords = ["obd", "obd2", "can", "vehicle", "automotive"]
+categories = ["hardware-support", "encoding"]
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+serialport = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

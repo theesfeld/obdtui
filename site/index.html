@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>obdtui — OBD-II TUI</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <header class="hero">
+    <p class="eyebrow">theesfeld · MIT · 0.1.0-dev.1</p>
+    <h1>obdtui</h1>
+    <p class="lede">
+      Linux OBD-II diagnostic TUI. Read live PIDs and DTCs. Save capture sessions for other projects.
+    </p>
+    <p class="status">
+      Status: Phase 0 ·
+      <a href="https://github.com/theesfeld/obdtui/issues/1">Issue #1</a> ·
+      Read-only by default · Not a full FORScan replacement
+    </p>
+    <p class="cta">
+      <a class="btn" href="https://github.com/theesfeld/obdtui">Source</a>
+      <a class="btn secondary" href="install.sh">install.sh</a>
+    </p>
+  </header>
+
+  <main>
+    <section>
+      <h2>What you get</h2>
+      <ul>
+        <li>USB ELM327 / STN serial path</li>
+        <li>Live Mode 01 data and DTC list</li>
+        <li>Capture packages: frames, signals, meta</li>
+        <li>Offline replay without a vehicle</li>
+        <li>Vehicle profiles as YAML (multi-make ready)</li>
+        <li>Bus tags for future HS-CAN / MS-CAN work</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Bluetooth (classic SPP)</h2>
+      <p>
+        Pair the adapter, bind RFCOMM, then open the serial node. The OBD protocol is the same as USB.
+      </p>
+      <pre><code>rfkill unblock bluetooth
+# pair and trust with bluetoothctl, then:
+sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF
+obdtui --port /dev/rfcomm0</code></pre>
+    </section>
+
+    <section>
+      <h2>Build from source</h2>
+      <pre><code>git clone https://github.com/theesfeld/obdtui.git
+cd obdtui
+cargo build --release -p obd-tui
+./target/release/obdtui --replay fixtures/sample-session</code></pre>
+    </section>
+
+    <section>
+      <h2>Safety</h2>
+      <p>Default mode is read-only. Clear DTCs only with <code>--allow-writes</code>.</p>
+      <p>Phase 0 does not program modules or write as-built data.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p><a href="https://github.com/theesfeld/obdtui">GitHub</a> · MIT License</p>
+  </footer>
+</body>
+</html>

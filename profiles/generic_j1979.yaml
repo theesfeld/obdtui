@@ -1,0 +1,35 @@
+id: generic_j1979
+name: Generic J1979
+makes:
+  - "*"
+notes: >
+  Standard OBD-II Mode 01 PIDs for the live dashboard.
+  Use this profile when no vehicle-specific map exists.
+dual_bus: false
+pids:
+  - mode: 1
+    pid: 12
+    name: engine_rpm
+    unit: rpm
+    description: Engine RPM
+  - mode: 1
+    pid: 13
+    name: vehicle_speed
+    unit: km/h
+    description: Vehicle speed
+  - mode: 1
+    pid: 5
+    name: coolant_temp
+    unit: C
+    description: Engine coolant temperature
+  - mode: 1
+    pid: 17
+    name: throttle
+    unit: "%"
+    description: Throttle position
+  - mode: 1
+    pid: 4
+    name: engine_load
+    unit: "%"
+    description: Calculated engine load
+modules: []

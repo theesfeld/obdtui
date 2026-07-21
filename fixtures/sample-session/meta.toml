@@ -1,0 +1,15 @@
+format_version = 1
+software = "obd-sim"
+started_at = "2026-07-21T22:07:38.515142847Z"
+ended_at = "2026-07-21T22:07:38.515199874Z"
+vin = "1FTFW1E50MFA00000"
+adapter_path = "replay://sample"
+profile_id = "generic_j1979"
+notes = "Synthetic fixture for CI and offline TUI."
+
+[capabilities]
+elm_compatible = true
+stn = false
+ms_can = false
+identity = "ELM327 SAMPLE"
+protocol = "ISO 15765-4 (CAN 11/500)"

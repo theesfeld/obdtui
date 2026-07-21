@@ -1,0 +1,25 @@
+[package]
+name = "obd-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "OBD-II replay simulator and sample capture fixtures"
+readme = "README.md"
+
+[dependencies]
+obd-io = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "obd-sim"
+path = "src/main.rs"

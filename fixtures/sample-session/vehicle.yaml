@@ -1,0 +1,7 @@
+id: generic_j1979
+name: Generic J1979
+makes: ["*"]
+notes: Sample fixture profile.
+dual_bus: false
+pids: []
+modules: []

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://theesfeld.github.io/obdtui/schemas/capture-session.schema.json",
+  "title": "obdtui CaptureSession",
+  "type": "object",
+  "required": ["meta", "frames", "signals"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["format_version", "software", "started_at"],
+      "properties": {
+        "format_version": { "type": "integer", "const": 1 },
+        "software": { "type": "string" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": ["string", "null"], "format": "date-time" },
+        "vin": { "type": ["string", "null"] },
+        "adapter_path": { "type": "string" },
+        "profile_id": { "type": ["string", "null"] },
+        "notes": { "type": "string" },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "elm_compatible": { "type": "boolean" },
+            "stn": { "type": "boolean" },
+            "ms_can": { "type": "boolean" },
+            "identity": { "type": "string" },
+            "protocol": { "type": "string" }
+          }
+        }
+      }
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ts", "dir", "bus", "data"],
+        "properties": {
+          "ts": { "type": "string", "format": "date-time" },
+          "dir": { "enum": ["tx", "rx"] },
+          "bus": { "enum": ["hs", "ms", "unknown"] },
+          "data": { "type": "string" }
+        }
+      }
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ts", "name", "value", "unit", "mode", "pid", "bus"],
+        "properties": {
+          "ts": { "type": "string", "format": "date-time" },
+          "name": { "type": "string" },
+          "value": { "type": "number" },
+          "unit": { "type": "string" },
+          "mode": { "type": "integer" },
+          "pid": { "type": "integer" },
+          "bus": { "enum": ["hs", "ms", "unknown"] }
+        }
+      }
+    },
+    "vehicle_yaml": { "type": ["string", "null"] }
+  }
+}

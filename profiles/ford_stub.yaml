@@ -1,0 +1,21 @@
+id: ford_stub
+name: Ford (stub)
+makes:
+  - Ford
+  - Lincoln
+  - Mercury
+notes: >
+  Placeholder profile for Ford dual-bus work.
+  Fill modules and enhanced PIDs from real captures.
+  MS-CAN needs a capable adapter. Phase 0 does not program modules.
+dual_bus: true
+pids: []
+modules:
+  - id: pcm
+    name: Powertrain Control Module
+    bus: hs
+    notes: Read via standard OBD on HS-CAN when present.
+  - id: bcm
+    name: Body Control Module
+    bus: ms
+    notes: Requires MS-CAN path. Not fully mapped in phase 0.
